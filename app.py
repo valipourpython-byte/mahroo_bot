@@ -3,6 +3,7 @@ import requests
 import os
 import psycopg
 import json
+import re
 
 app = Flask(__name__)
 
@@ -13,7 +14,10 @@ app = Flask(__name__)
 TOKEN = os.getenv("BALE_BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-BALE_API = f"https://tapi.bale.ai/bot{TOKEN}/sendMessage"
+if TOKEN:
+    BALE_API = f"https://tapi.bale.ai/bot{TOKEN}/sendMessage"
+else:
+    BALE_API = None
 
 
 # =========================================================
@@ -36,9 +40,9 @@ def init_database():
 
             with conn.cursor() as cur:
 
-                # -------------------------
+                # -------------------------------------------------
                 # Users
-                # -------------------------
+                # -------------------------------------------------
 
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS users (
@@ -51,9 +55,16 @@ def init_database():
                     );
                 """)
 
-                # -------------------------
+                # اگر جدول قبلاً ساخته شده باشد
+                # این دستور display_name را در صورت نبودن اضافه می‌کند.
+                cur.execute("""
+                    ALTER TABLE users
+                    ADD COLUMN IF NOT EXISTS display_name TEXT;
+                """)
+
+                # -------------------------------------------------
                 # Medications
-                # -------------------------
+                # -------------------------------------------------
 
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS medications (
@@ -71,9 +82,9 @@ def init_database():
                     );
                 """)
 
-                # -------------------------
+                # -------------------------------------------------
                 # Medication schedules
-                # -------------------------
+                # -------------------------------------------------
 
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS medication_schedules (
@@ -89,9 +100,9 @@ def init_database():
                     );
                 """)
 
-                # -------------------------
+                # -------------------------------------------------
                 # User sessions
-                # -------------------------
+                # -------------------------------------------------
 
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS user_sessions (
@@ -114,7 +125,6 @@ def init_database():
         print("Database initialized successfully.")
 
     except Exception as e:
-
         print("Database initialization error:", e)
 
 
@@ -124,13 +134,15 @@ def init_database():
 
 def send_message(chat_id, text, buttons=None):
 
+    if not BALE_API:
+        print("ERROR: BALE_BOT_TOKEN is not set")
+        return None
+
     payload = {
         "chat_id": chat_id,
         "text": text
     }
 
-    # Bale may support keyboard structures depending
-    # on the bot API version.
     if buttons:
         payload["reply_markup"] = {
             "keyboard": buttons,
@@ -268,7 +280,7 @@ def get_session(user_id):
 
     try:
         data = json.loads(row[1]) if row[1] else {}
-    except:
+    except Exception:
         data = {}
 
     return {
@@ -292,7 +304,7 @@ def clear_session(user_id):
 
 
 # =========================================================
-# Save display name
+# Display Name
 # =========================================================
 
 def save_display_name(user_id, display_name):
@@ -314,7 +326,7 @@ def save_display_name(user_id, display_name):
 
 
 # =========================================================
-# Save medication
+# Save Medication
 # =========================================================
 
 def save_medication(
@@ -327,8 +339,6 @@ def save_medication(
     with get_db_connection() as conn:
 
         with conn.cursor() as cur:
-
-            # Create medication
 
             cur.execute("""
                 INSERT INTO medications (
@@ -347,8 +357,6 @@ def save_medication(
             ))
 
             medication_id = cur.fetchone()[0]
-
-            # Create schedules
 
             for index, time in enumerate(times, start=1):
 
@@ -372,6 +380,19 @@ def save_medication(
 
 
 # =========================================================
+# Time Validation
+# =========================================================
+
+def is_valid_time(time_text):
+
+    pattern = r"^(?:[01]\d|2[0-3]):[0-5]\d$"
+
+    return bool(
+        re.match(pattern, time_text)
+    )
+
+
+# =========================================================
 # Main Menu
 # =========================================================
 
@@ -379,9 +400,11 @@ def main_menu(chat_id, name):
 
     send_message(
         chat_id,
+
         f"خیلی خوشحالم که با من آشنا شدی {name} جان 🌱\n\n"
         "من «مهرور» هستم؛ سامانه یادآوری داروهای شما 💚\n\n"
         "از منوی زیر می‌تونی داروهات رو مدیریت کنی.",
+
         buttons=[
             ["➕ افزودن دارو"],
             ["💊 داروهای من"],
@@ -391,7 +414,7 @@ def main_menu(chat_id, name):
 
 
 # =========================================================
-# Start
+# Start Conversation
 # =========================================================
 
 def start_conversation(chat_id, db_user):
@@ -400,7 +423,10 @@ def start_conversation(chat_id, db_user):
 
     if display_name:
 
-        main_menu(chat_id, display_name)
+        main_menu(
+            chat_id,
+            display_name
+        )
 
         set_session(
             db_user["id"],
@@ -412,8 +438,9 @@ def start_conversation(chat_id, db_user):
 
         send_message(
             chat_id,
+
             "سلام 🌱\n\n"
-            "من مهرور هستم؛ سامانه یادآوری داروهای شما 💚\n\n"
+            "من «مهرور» هستم؛ سامانه یادآوری داروهای شما 💚\n\n"
             "خوشحال می‌شم بدونم با چه اسمی صداتون بزنم؟"
         )
 
@@ -450,8 +477,10 @@ def show_medications(chat_id, user_id):
 
         send_message(
             chat_id,
+
             "هنوز هیچ دارویی ثبت نکردی 💊\n\n"
             "برای شروع، روی «➕ افزودن دارو» بزن.",
+
             buttons=[
                 ["➕ افزودن دارو"],
                 ["↩️ منوی اصلی"]
@@ -462,23 +491,24 @@ def show_medications(chat_id, user_id):
 
     text = "💊 داروهای ثبت‌شده شما:\n\n"
 
-    for index, medication in enumerate(
-        medications,
-        start=1
-    ):
+    with get_db_connection() as conn:
 
-        medication_id = medication[0]
-        name = medication[1]
-        times_per_day = medication[2]
+        with conn.cursor() as cur:
 
-        text += (
-            f"{index}. {name}\n"
-            f"   تعداد مصرف روزانه: {times_per_day} بار\n"
-        )
+            for index, medication in enumerate(
+                medications,
+                start=1
+            ):
 
-        with get_db_connection() as conn:
+                medication_id = medication[0]
+                name = medication[1]
+                times_per_day = medication[2]
 
-            with conn.cursor() as cur:
+                text += (
+                    f"{index}. 💊 {name}\n"
+                    f"   🔢 تعداد مصرف روزانه: "
+                    f"{times_per_day} بار\n"
+                )
 
                 cur.execute("""
                     SELECT time
@@ -489,11 +519,11 @@ def show_medications(chat_id, user_id):
 
                 schedules = cur.fetchall()
 
-        for schedule in schedules:
+                for schedule in schedules:
 
-            text += f"   ⏰ {schedule[0]}\n"
+                    text += f"   ⏰ {schedule[0]}\n"
 
-        text += "\n"
+                text += "\n"
 
     send_message(
         chat_id,
@@ -513,13 +543,6 @@ def cancel_conversation(chat_id, user_id):
 
     clear_session(user_id)
 
-    send_message(
-        chat_id,
-        "عملیات لغو شد. 🌱"
-    )
-
-    # Find user's name
-
     with get_db_connection() as conn:
 
         with conn.cursor() as cur:
@@ -532,9 +555,27 @@ def cancel_conversation(chat_id, user_id):
 
             row = cur.fetchone()
 
-    name = row[0] if row and row[0] else "دوست من"
+    name = (
+        row[0]
+        if row and row[0]
+        else "دوست من"
+    )
 
-    main_menu(chat_id, name)
+    send_message(
+        chat_id,
+        "عملیات لغو شد. 🌱"
+    )
+
+    main_menu(
+        chat_id,
+        name
+    )
+
+    set_session(
+        user_id,
+        "MAIN_MENU",
+        {}
+    )
 
 
 # =========================================================
@@ -551,6 +592,7 @@ def start_add_medication(chat_id, user_id):
 
     send_message(
         chat_id,
+
         "💊 خیلی خوب.\n\n"
         "اسم دارویی که می‌خوای ثبت کنی رو بنویس:"
     )
@@ -566,14 +608,24 @@ def show_confirmation(
     data
 ):
 
-    name = data.get("medication_name")
-    times_per_day = data.get("times_per_day")
-    times = data.get("times", [])
+    name = data.get(
+        "medication_name"
+    )
+
+    times_per_day = data.get(
+        "times_per_day"
+    )
+
+    times = data.get(
+        "times",
+        []
+    )
 
     text = (
         "📋 اطلاعات دارو:\n\n"
         f"💊 نام دارو: {name}\n"
-        f"🔢 تعداد مصرف در روز: {times_per_day} بار\n\n"
+        f"🔢 تعداد مصرف در روز: "
+        f"{times_per_day} بار\n\n"
         "⏰ ساعت‌های مصرف:\n"
     )
 
@@ -582,7 +634,9 @@ def show_confirmation(
         start=1
     ):
 
-        text += f"{index}. {time}\n"
+        text += (
+            f"{index}. {time}\n"
+        )
 
     text += (
         "\nآیا اطلاعات بالا درست است؟"
@@ -599,6 +653,7 @@ def show_confirmation(
         text,
         buttons=[
             ["✅ ثبت دارو"],
+            ["🔄 اصلاح اطلاعات"],
             ["❌ لغو"]
         ]
     )
@@ -639,9 +694,9 @@ def receive_message():
             ""
         ).strip()
 
-        # ---------------------------------------------
+        # -------------------------------------------------
         # User
-        # ---------------------------------------------
+        # -------------------------------------------------
 
         db_user = get_or_create_user(user)
 
@@ -653,9 +708,9 @@ def receive_message():
 
         user_id = db_user["id"]
 
-        # ---------------------------------------------
+        # -------------------------------------------------
         # Cancel
-        # ---------------------------------------------
+        # -------------------------------------------------
 
         if text in [
             "❌ لغو",
@@ -672,9 +727,9 @@ def receive_message():
                 "status": "ok"
             })
 
-        # ---------------------------------------------
+        # -------------------------------------------------
         # Start
-        # ---------------------------------------------
+        # -------------------------------------------------
 
         if text in [
             "/start",
@@ -691,9 +746,9 @@ def receive_message():
                 "status": "ok"
             })
 
-        # ---------------------------------------------
+        # -------------------------------------------------
         # Session
-        # ---------------------------------------------
+        # -------------------------------------------------
 
         session = get_session(
             user_id
@@ -743,8 +798,11 @@ def receive_message():
 
             send_message(
                 chat_id,
-                f"{display_name} جان، خیلی خوشحالم 🌱\n\n"
+
+                f"{display_name} جان، "
+                "خیلی خوشحالم که آشنات شدم 🌱\n\n"
                 "حالا می‌تونیم داروهات رو ثبت کنیم.",
+
                 buttons=[
                     ["➕ افزودن دارو"],
                     ["💊 داروهای من"]
@@ -796,10 +854,13 @@ def receive_message():
 
             send_message(
                 chat_id,
+
                 "لطفاً یکی از گزینه‌های منو رو انتخاب کن.",
+
                 buttons=[
                     ["➕ افزودن دارو"],
-                    ["💊 داروهای من"]
+                    ["💊 داروهای من"],
+                    ["❌ لغو"]
                 ]
             )
 
@@ -836,8 +897,10 @@ def receive_message():
 
             send_message(
                 chat_id,
+
                 f"💊 داروی «{text}»\n\n"
                 "این دارو رو روزی چند بار مصرف می‌کنی؟",
+
                 buttons=[
                     ["1️⃣ یک بار در روز"],
                     ["🔢 چند بار در روز"],
@@ -867,6 +930,7 @@ def receive_message():
 
                 send_message(
                     chat_id,
+
                     "⏰ ساعت مصرف رو وارد کن.\n\n"
                     "مثلاً: 08:00"
                 )
@@ -885,7 +949,9 @@ def receive_message():
 
                 send_message(
                     chat_id,
-                    "🔢 دقیقاً چند بار در روز مصرف می‌کنی؟\n\n"
+
+                    "🔢 دقیقاً چند بار در روز "
+                    "مصرف می‌کنی؟\n\n"
                     "مثلاً: 2"
                 )
 
@@ -895,7 +961,9 @@ def receive_message():
 
             send_message(
                 chat_id,
+
                 "لطفاً یکی از گزینه‌ها رو انتخاب کن.",
+
                 buttons=[
                     ["1️⃣ یک بار در روز"],
                     ["🔢 چند بار در روز"],
@@ -914,18 +982,18 @@ def receive_message():
         if state == "ASK_NUMBER_OF_DOSES":
 
             try:
-
                 number = int(text)
-
-            except:
-
+            except Exception:
                 number = 0
 
             if number < 2 or number > 10:
 
                 send_message(
                     chat_id,
-                    "لطفاً تعداد دفعات رو به صورت عددی بین ۲ تا ۱۰ وارد کن."
+
+                    "لطفاً تعداد دفعات رو به صورت "
+                    "عدد بین ۲ تا ۱۰ وارد کن.\n\n"
+                    "مثلاً: 2"
                 )
 
                 return jsonify({
@@ -934,7 +1002,6 @@ def receive_message():
 
             session_data["times_per_day"] = number
             session_data["times"] = []
-            session_data["current_dose"] = 1
 
             set_session(
                 user_id,
@@ -944,6 +1011,7 @@ def receive_message():
 
             send_message(
                 chat_id,
+
                 "⏰ ساعت نوبت اول رو وارد کن.\n\n"
                 "مثلاً: 08:00"
             )
@@ -960,12 +1028,15 @@ def receive_message():
 
             time = text
 
-            if not time:
+            if not is_valid_time(time):
 
                 send_message(
                     chat_id,
-                    "لطفاً ساعت مصرف رو وارد کن.\n"
-                    "مثلاً: 08:00"
+
+                    "⏰ فرمت ساعت درست نیست.\n\n"
+                    "لطفاً ساعت رو به شکل زیر وارد کن:\n"
+                    "08:00\n\n"
+                    "مثلاً 14:30"
                 )
 
                 return jsonify({
@@ -982,7 +1053,9 @@ def receive_message():
                 []
             )
 
+            # -------------------------------------------------
             # One time per day
+            # -------------------------------------------------
 
             if times_per_day == 1:
 
@@ -1000,17 +1073,17 @@ def receive_message():
                     "status": "ok"
                 })
 
+            # -------------------------------------------------
             # Multiple times
+            # -------------------------------------------------
 
             times.append(time)
 
             session_data["times"] = times
 
-            current_dose = len(times) + 1
-
             if len(times) < times_per_day:
 
-                session_data["current_dose"] = current_dose
+                next_dose = len(times) + 1
 
                 set_session(
                     user_id,
@@ -1020,7 +1093,9 @@ def receive_message():
 
                 send_message(
                     chat_id,
-                    f"⏰ ساعت نوبت {current_dose} رو وارد کن.\n\n"
+
+                    f"⏰ ساعت نوبت "
+                    f"{next_dose} رو وارد کن.\n\n"
                     "مثلاً: 20:00"
                 )
 
@@ -1028,6 +1103,7 @@ def receive_message():
                     "status": "ok"
                 })
 
+            # همه ساعت‌ها گرفته شده
             show_confirmation(
                 chat_id,
                 user_id,
@@ -1039,18 +1115,24 @@ def receive_message():
             })
 
         # =================================================
-        # CONFIRM
+        # CONFIRM MEDICATION
         # =================================================
 
         if state == "CONFIRM_MEDICATION":
 
             if text == "✅ ثبت دارو":
 
-                medication_id = save_medication(
+                save_medication(
                     user_id=user_id,
-                    medication_name=session_data["medication_name"],
-                    times_per_day=session_data["times_per_day"],
-                    times=session_data["times"]
+                    medication_name=session_data[
+                        "medication_name"
+                    ],
+                    times_per_day=session_data[
+                        "times_per_day"
+                    ],
+                    times=session_data[
+                        "times"
+                    ]
                 )
 
                 clear_session(
@@ -1059,8 +1141,11 @@ def receive_message():
 
                 send_message(
                     chat_id,
+
                     "✅ دارو با موفقیت ثبت شد! 💚\n\n"
-                    "هر زمان بخوای می‌تونی داروی دیگری هم اضافه کنی.",
+                    "هر زمان بخوای می‌تونی داروی "
+                    "دیگری هم اضافه کنی.",
+
                     buttons=[
                         ["➕ افزودن دارو"],
                         ["💊 داروهای من"],
@@ -1072,10 +1157,33 @@ def receive_message():
                     "status": "ok"
                 })
 
+            if text == "🔄 اصلاح اطلاعات":
+
+                set_session(
+                    user_id,
+                    "ASK_MEDICATION_NAME",
+                    {}
+                )
+
+                send_message(
+                    chat_id,
+
+                    "🔄 باشه، دوباره شروع می‌کنیم.\n\n"
+                    "اسم دارو رو وارد کن:"
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
             send_message(
                 chat_id,
-                "اگر اطلاعات درست نیست، عملیات رو لغو کن و دوباره دارو رو ثبت کن.",
+
+                "لطفاً مشخص کن اطلاعات درست هست یا نه.",
+
                 buttons=[
+                    ["✅ ثبت دارو"],
+                    ["🔄 اصلاح اطلاعات"],
                     ["❌ لغو"]
                 ]
             )
@@ -1090,17 +1198,31 @@ def receive_message():
 
         send_message(
             chat_id,
-            "متوجه نشدم 🙂\n"
+
+            "متوجه نشدم 🙂\n\n"
             "لطفاً از گزینه‌های موجود استفاده کن."
         )
 
     except Exception as e:
 
-        print("Error:", e)
+        print(
+            "ERROR in message handler:",
+            repr(e)
+        )
 
     return jsonify({
         "status": "ok"
     })
+
+
+# =========================================================
+# Home
+# =========================================================
+
+@app.route("/")
+def home():
+
+    return "Mahroo backend is running 🚀"
 
 
 # =========================================================
