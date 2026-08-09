@@ -21,10 +21,12 @@ def receive_message():
 
         reply_text = f"شما گفتید: {text}"
 
-        requests.post(BALE_API, json={
+        response = requests.post(BALE_API, json={
             "chat_id": chat_id,
             "text": reply_text
         })
+
+        print("Bale response:", response.status_code, response.text)
 
     except Exception as e:
         print("Error:", e)
