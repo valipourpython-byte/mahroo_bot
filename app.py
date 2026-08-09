@@ -16,14 +16,13 @@ app = Flask(__name__)
 TOKEN = os.getenv("BALE_BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# منطقه زمانی
-# اگر نمایشگاه و کاربران در ایران هستند، همین را نگه دار.
-TIMEZONE = os.getenv("TIMEZONE", "Asia/Tehran")
-
 if TOKEN:
     BALE_API = f"https://tapi.bale.ai/bot{TOKEN}/sendMessage"
 else:
     BALE_API = None
+
+# ساعت ایران
+IRAN_TZ = ZoneInfo("Asia/Tehran")
 
 
 # =========================================================
@@ -126,7 +125,8 @@ def init_database():
 
                 # -------------------------------------------------
                 # Reminder logs
-                # جلوگیری از ارسال چندباره یک یادآوری
+                #
+                # جلوگیری از ارسال دوباره یک یادآوری در همان روز
                 # -------------------------------------------------
 
                 cur.execute("""
@@ -153,11 +153,7 @@ def init_database():
         print("Database initialized successfully.")
 
     except Exception as e:
-
-        print(
-            "Database initialization error:",
-            repr(e)
-        )
+        print("Database initialization error:", repr(e))
 
 
 # =========================================================
@@ -176,7 +172,6 @@ def send_message(chat_id, text, buttons=None):
     }
 
     if buttons:
-
         payload["reply_markup"] = {
             "keyboard": buttons,
             "resize_keyboard": True
@@ -200,11 +195,7 @@ def send_message(chat_id, text, buttons=None):
 
     except Exception as e:
 
-        print(
-            "Bale send error:",
-            repr(e)
-        )
-
+        print("Bale send error:", repr(e))
         return None
 
 
@@ -321,15 +312,8 @@ def get_session(user_id):
         return None
 
     try:
-
-        data = (
-            json.loads(row[1])
-            if row[1]
-            else {}
-        )
-
+        data = json.loads(row[1]) if row[1] else {}
     except Exception:
-
         data = {}
 
     return {
@@ -407,10 +391,7 @@ def save_medication(
 
             medication_id = cur.fetchone()[0]
 
-            for index, time in enumerate(
-                times,
-                start=1
-            ):
+            for index, time in enumerate(times, start=1):
 
                 cur.execute("""
                     INSERT INTO medication_schedules (
@@ -451,7 +432,6 @@ def is_valid_time(time_text):
 def main_menu(chat_id, name):
 
     send_message(
-
         chat_id,
 
         f"خیلی خوشحالم که با من آشنا شدی {name} جان 🌱\n\n"
@@ -490,7 +470,6 @@ def start_conversation(chat_id, db_user):
     else:
 
         send_message(
-
             chat_id,
 
             "سلام 🌱\n\n"
@@ -530,7 +509,6 @@ def show_medications(chat_id, user_id):
             if not medications:
 
                 send_message(
-
                     chat_id,
 
                     "هنوز هیچ دارویی ثبت نکردی 💊\n\n"
@@ -572,17 +550,13 @@ def show_medications(chat_id, user_id):
 
                 for schedule in schedules:
 
-                    text += (
-                        f"   ⏰ {schedule[0]}\n"
-                    )
+                    text += f"   ⏰ {schedule[0]}\n"
 
                 text += "\n"
 
     send_message(
-
         chat_id,
         text,
-
         buttons=[
             ["➕ افزودن دارو"],
             ["↩️ منوی اصلی"]
@@ -646,7 +620,6 @@ def start_add_medication(chat_id, user_id):
     )
 
     send_message(
-
         chat_id,
 
         "💊 خیلی خوب.\n\n"
@@ -705,10 +678,8 @@ def show_confirmation(
     )
 
     send_message(
-
         chat_id,
         text,
-
         buttons=[
             ["✅ ثبت دارو"],
             ["🔄 اصلاح اطلاعات"],
@@ -721,40 +692,18 @@ def show_confirmation(
 # REMINDER SYSTEM
 # =========================================================
 
-def get_current_time():
+@app.route("/check-reminders", methods=["GET"])
+def check_reminders():
 
-    try:
+    print("Reminder check started.")
 
-        timezone = ZoneInfo(TIMEZONE)
-
-        return datetime.now(
-            timezone
-        )
-
-    except Exception:
-
-        print(
-            "Invalid TIMEZONE:",
-            TIMEZONE
-        )
-
-        return datetime.now()
-
-
-def send_due_reminders():
-
-    now = get_current_time()
+    now = datetime.now(IRAN_TZ)
 
     current_time = now.strftime("%H:%M")
-    current_date = now.date()
-
-    print(
-        f"Reminder check: "
-        f"{current_date} {current_time} "
-        f"({TIMEZONE})"
-    )
+    today = now.date()
 
     sent_count = 0
+    error_count = 0
 
     try:
 
@@ -767,8 +716,10 @@ def send_due_reminders():
                         ms.id,
                         ms.time,
                         m.name,
+                        u.id,
                         u.bale_user_id,
-                        u.display_name
+                        u.display_name,
+                        ms.dose_number
                     FROM medication_schedules ms
 
                     JOIN medications m
@@ -777,20 +728,31 @@ def send_due_reminders():
                     JOIN users u
                         ON u.id = m.user_id
 
-                    WHERE ms.time = %s;
+                    WHERE ms.time = %s
+                    ORDER BY ms.id;
                 """, (current_time,))
 
-                due_medications = cur.fetchall()
+                reminders = cur.fetchall()
 
-                for row in due_medications:
+                print(
+                    f"Found {len(reminders)} reminder(s) "
+                    f"for {current_time}"
+                )
 
-                    schedule_id = row[0]
-                    medication_time = row[1]
-                    medication_name = row[2]
-                    bale_user_id = row[3]
-                    display_name = row[4]
+                for reminder in reminders:
 
-                    # آیا امروز قبلاً ارسال شده؟
+                    schedule_id = reminder[0]
+                    medication_time = reminder[1]
+                    medication_name = reminder[2]
+                    user_id = reminder[3]
+                    bale_user_id = reminder[4]
+                    display_name = reminder[5]
+                    dose_number = reminder[6]
+
+                    # -------------------------------------------------
+                    # جلوگیری از ارسال دوباره
+                    # -------------------------------------------------
+
                     cur.execute("""
                         SELECT id
                         FROM reminder_logs
@@ -798,34 +760,50 @@ def send_due_reminders():
                         AND reminder_date = %s;
                     """, (
                         schedule_id,
-                        current_date
+                        today
                     ))
 
                     already_sent = cur.fetchone()
 
                     if already_sent:
-
+                        print(
+                            "Already sent:",
+                            medication_name,
+                            medication_time,
+                            bale_user_id
+                        )
                         continue
 
-                    name = (
-                        display_name
-                        if display_name
-                        else "دوست من"
-                    )
+                    # -------------------------------------------------
+                    # ارسال پیام
+                    # -------------------------------------------------
 
-                    reminder_text = (
-                        f"🔔 {name} جان، وقتشه داروی "
-                        f"«{medication_name}» رو مصرف کنی. 💊\n\n"
-                        f"⏰ ساعت مصرف: {medication_time}\n\n"
-                        "لطفاً بعد از مصرف دارو یادت نره که بهش توجه کنی. 💚"
+                    if display_name:
+
+                        greeting = f"{display_name} جان 🌱"
+
+                    else:
+
+                        greeting = "دوست عزیز 🌱"
+
+                    message = (
+                        f"⏰ یادآوری مصرف دارو\n\n"
+                        f"{greeting}\n\n"
+                        f"💊 زمان مصرف «{medication_name}» "
+                        f"رسیده است.\n\n"
+                        f"🕐 ساعت: {medication_time}\n"
+                        f"💊 نوبت مصرف: {dose_number}"
                     )
 
                     response = send_message(
                         bale_user_id,
-                        reminder_text
+                        message
                     )
 
-                    # فقط در صورت موفقیت ارسال ثبت شود
+                    # -------------------------------------------------
+                    # ثبت موفقیت
+                    # -------------------------------------------------
+
                     if response and response.ok:
 
                         cur.execute("""
@@ -844,7 +822,7 @@ def send_due_reminders():
                             DO NOTHING;
                         """, (
                             schedule_id,
-                            current_date
+                            today
                         ))
 
                         sent_count += 1
@@ -856,9 +834,30 @@ def send_due_reminders():
                             bale_user_id
                         )
 
+                    else:
+
+                        error_count += 1
+
+                        print(
+                            "Reminder failed:",
+                            medication_name,
+                            medication_time,
+                            bale_user_id
+                        )
+
             conn.commit()
 
-        return sent_count
+        print(
+            f"Reminder check finished. "
+            f"Sent={sent_count}, Errors={error_count}"
+        )
+
+        return jsonify({
+            "status": "ok",
+            "current_time": current_time,
+            "sent": sent_count,
+            "errors": error_count
+        })
 
     except Exception as e:
 
@@ -867,24 +866,10 @@ def send_due_reminders():
             repr(e)
         )
 
-        return 0
-
-
-# =========================================================
-# Reminder Test
-# =========================================================
-
-@app.route("/reminders", methods=["GET"])
-def reminders():
-
-    print("Reminder endpoint called.")
-
-    sent_count = send_due_reminders()
-
-    return jsonify({
-        "status": "ok",
-        "reminders_sent": sent_count
-    })
+        return jsonify({
+            "status": "error",
+            "error": str(e)
+        }), 500
 
 
 # =========================================================
@@ -896,10 +881,7 @@ def receive_message():
 
     data = request.json
 
-    print(
-        "Received:",
-        data
-    )
+    print("Received:", data)
 
     try:
 
@@ -1028,11 +1010,10 @@ def receive_message():
             )
 
             send_message(
-
                 chat_id,
 
                 f"{display_name} جان، "
-                "خیلی خوشحالم که باهات آشنا شدم 🌱\n\n"
+                "خیلی خوشحالم که آشنات شدم 🌱\n\n"
                 "حالا می‌تونیم داروهات رو ثبت کنیم.",
 
                 buttons=[
@@ -1085,7 +1066,6 @@ def receive_message():
                 })
 
             send_message(
-
                 chat_id,
 
                 "لطفاً یکی از گزینه‌های منو رو انتخاب کن.",
@@ -1129,7 +1109,6 @@ def receive_message():
             )
 
             send_message(
-
                 chat_id,
 
                 f"💊 داروی «{text}»\n\n"
@@ -1163,7 +1142,6 @@ def receive_message():
                 )
 
                 send_message(
-
                     chat_id,
 
                     "⏰ ساعت مصرف رو وارد کن.\n\n"
@@ -1183,7 +1161,6 @@ def receive_message():
                 )
 
                 send_message(
-
                     chat_id,
 
                     "🔢 دقیقاً چند بار در روز "
@@ -1196,7 +1173,6 @@ def receive_message():
                 })
 
             send_message(
-
                 chat_id,
 
                 "لطفاً یکی از گزینه‌ها رو انتخاب کن.",
@@ -1219,17 +1195,13 @@ def receive_message():
         if state == "ASK_NUMBER_OF_DOSES":
 
             try:
-
                 number = int(text)
-
             except Exception:
-
                 number = 0
 
             if number < 2 or number > 10:
 
                 send_message(
-
                     chat_id,
 
                     "لطفاً تعداد دفعات رو به صورت "
@@ -1251,7 +1223,6 @@ def receive_message():
             )
 
             send_message(
-
                 chat_id,
 
                 "⏰ ساعت نوبت اول رو وارد کن.\n\n"
@@ -1273,7 +1244,6 @@ def receive_message():
             if not is_valid_time(time):
 
                 send_message(
-
                     chat_id,
 
                     "⏰ فرمت ساعت درست نیست.\n\n"
@@ -1296,7 +1266,6 @@ def receive_message():
                 []
             )
 
-            # یک بار در روز
             if times_per_day == 1:
 
                 times = [time]
@@ -1313,7 +1282,6 @@ def receive_message():
                     "status": "ok"
                 })
 
-            # چند بار در روز
             times.append(time)
 
             session_data["times"] = times
@@ -1329,7 +1297,6 @@ def receive_message():
                 )
 
                 send_message(
-
                     chat_id,
 
                     f"⏰ ساعت نوبت "
@@ -1360,17 +1327,13 @@ def receive_message():
             if text == "✅ ثبت دارو":
 
                 save_medication(
-
                     user_id=user_id,
-
                     medication_name=session_data[
                         "medication_name"
                     ],
-
                     times_per_day=session_data[
                         "times_per_day"
                     ],
-
                     times=session_data[
                         "times"
                     ]
@@ -1381,12 +1344,11 @@ def receive_message():
                 )
 
                 send_message(
-
                     chat_id,
 
                     "✅ دارو با موفقیت ثبت شد! 💚\n\n"
-                    "از این به بعد در ساعت تعیین‌شده "
-                    "یادت می‌اندازم که داروت رو مصرف کنی. 🔔",
+                    "از این به بعد در ساعت‌های تعیین‌شده "
+                    "یادآوری مصرف دارو برات ارسال می‌کنم. ⏰",
 
                     buttons=[
                         ["➕ افزودن دارو"],
@@ -1408,7 +1370,6 @@ def receive_message():
                 )
 
                 send_message(
-
                     chat_id,
 
                     "🔄 باشه، دوباره شروع می‌کنیم.\n\n"
@@ -1420,7 +1381,6 @@ def receive_message():
                 })
 
             send_message(
-
                 chat_id,
 
                 "لطفاً مشخص کن اطلاعات درست هست یا نه.",
@@ -1441,7 +1401,6 @@ def receive_message():
         # =================================================
 
         send_message(
-
             chat_id,
 
             "متوجه نشدم 🙂\n\n"
