@@ -1,9 +1,9 @@
 from flask import Flask, request, jsonify
 import requests
-
+import os
 app = Flask(__name__)
 
-TOKEN = "1767613620:LBxG7hKbi_M8x8ASIlAcvr1dWgrmcG6SEx0"
+TOKEN = os.getenv("BALE_BOT_TOKEN")
 BALE_API = f"https://tapi.bale.ai/bot{TOKEN}/sendMessage"
 
 @app.route("/")
