@@ -3,7 +3,7 @@ import requests
 
 app = Flask(__name__)
 
-TOKEN = "YOUR_BALE_BOT_TOKEN"
+TOKEN = "1767613620:LBxG7hKbi_M8x8ASIlAcvr1dWgrmcG6SEx0"
 BALE_API = f"https://tapi.bale.ai/bot{TOKEN}/sendMessage"
 
 @app.route("/")
