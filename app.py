@@ -1187,8 +1187,16 @@ def handle_reminder_action(
 def create_due_occurrences(
     cur,
     today,
-    current_time
+    now
 ):
+
+    # -------------------------------------------------
+    # only remined items with 10 minuts delay or less
+    # -------------------------------------------------
+
+    window_start = now - timedelta(
+        minutes=10
+    )
 
     cur.execute("""
         SELECT
@@ -1197,12 +1205,8 @@ def create_due_occurrences(
 
         FROM medication_schedules ms
 
-        WHERE ms.time <= %s
-
         ORDER BY ms.time;
-    """, (
-        current_time,
-    ))
+    """)
 
     schedules = cur.fetchall()
 
@@ -1212,6 +1216,50 @@ def create_due_occurrences(
 
         schedule_id = schedule[0]
         scheduled_time = schedule[1]
+
+        # -------------------------------------------------
+        # تبدیل ساعت دارو مثل 10:00 به datetime امروز
+        # -------------------------------------------------
+
+        try:
+
+            scheduled_datetime = datetime.combine(
+                today,
+                datetime.strptime(
+                    scheduled_time,
+                    "%H:%M"
+                ).time()
+            )
+
+            scheduled_datetime = scheduled_datetime.replace(
+                tzinfo=IRAN_TZ
+            )
+
+        except Exception as e:
+
+            print(
+                "Invalid medication schedule time:",
+                scheduled_time,
+                repr(e)
+            )
+
+            continue
+
+        # -------------------------------------------------
+        # only times with 10 minuts in window
+        # -------------------------------------------------
+
+        if not (
+            window_start
+            <= scheduled_datetime
+            <= now
+        ):
+
+            continue
+
+        # -------------------------------------------------
+        # create occurrence
+        # -------------------------------------------------
 
         cur.execute("""
             INSERT INTO reminder_occurrences (
@@ -1241,10 +1289,10 @@ def create_due_occurrences(
         ))
 
         if cur.rowcount > 0:
+
             created += 1
 
     return created
-
 
 # =========================================================
 # REMINDER SYSTEM
@@ -1281,16 +1329,14 @@ def check_reminders():
             with conn.cursor() as cur:
 
                 # -------------------------------------------------
-                # اول نوبت‌های امروز که زمانشان رسیده را ایجاد می‌کنیم
+                # first create tinmes that reach times
                 #
-                # این قسمت باعث می‌شود اگر Cron مثلاً ساعت 10:02
-                # اجرا شد، نوبت 10:00 از دست نرود.
                 # -------------------------------------------------
 
                 created = create_due_occurrences(
                     cur,
                     today,
-                    current_time
+                    now
                 )
 
                 print(
@@ -1299,7 +1345,7 @@ def check_reminders():
                 )
 
                 # -------------------------------------------------
-                # نوبت‌های معمولی که هنوز ارسال نشده‌اند
+                # ordinary items
                 # -------------------------------------------------
 
                 cur.execute("""
