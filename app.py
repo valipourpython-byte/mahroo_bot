@@ -1345,7 +1345,7 @@ def check_reminders():
                 )
 
                 # -------------------------------------------------
-                # ordinary items
+                # # نوبت‌های معمولی که هنوز ارسال نشده‌اند
                 # -------------------------------------------------
 
                 cur.execute("""
@@ -1385,9 +1385,60 @@ def check_reminders():
 
                 reminders = cur.fetchall()
 
+                # -------------------------------------------------
+                # فقط pendingهایی که هنوز داخل پنجره ۱۰ دقیقه‌ای
+                # هستند اجازه ارسال دارند.
+                # -------------------------------------------------
+                
+                window_start = now - timedelta(
+                    minutes=10
+                )
+                
+                valid_reminders = []
+                
+                for reminder in reminders:
+                
+                    medication_time = reminder[2]
+                
+                    try:
+                
+                        scheduled_datetime = datetime.combine(
+                            today,
+                            datetime.strptime(
+                                medication_time,
+                                "%H:%M"
+                            ).time()
+                        )
+                
+                        scheduled_datetime = scheduled_datetime.replace(
+                            tzinfo=IRAN_TZ
+                        )
+                
+                    except Exception as e:
+                
+                        print(
+                            "Invalid reminder time:",
+                            medication_time,
+                            repr(e)
+                        )
+                
+                        continue
+                
+                    if (
+                        window_start
+                        <= scheduled_datetime
+                        <= now
+                    ):
+                
+                        valid_reminders.append(
+                            reminder
+                        )
+                
+                reminders = valid_reminders
+                
                 print(
                     f"Found {len(reminders)} "
-                    f"pending reminder(s)."
+                    f"valid pending reminder(s)."
                 )
 
                 for reminder in reminders:
