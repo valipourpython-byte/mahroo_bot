@@ -367,7 +367,26 @@ def get_or_create_user(user):
         "display_name": row[1]
     }
 
+# =====================================================
+# Medication Button
+# =====================================================
 
+medication = get_medication_by_button(
+    user_id,
+    text
+)
+
+if medication:
+
+    show_medication_management(
+        chat_id,
+        user_id,
+        medication[0]
+    )
+
+    return jsonify({
+        "status": "ok"
+    })
 # =========================================================
 # Session
 # =========================================================
@@ -1167,18 +1186,21 @@ def show_medications(
 # Get User Medication By Button Text
 # =========================================================
 
-def get_medication_by_button(
-    user_id,
-    text
-):
+def get_medication_by_button(user_id, text):
 
-    if not text.startswith("💊 "):
-
+    if not text:
         return None
 
+    # دکمه‌های دارو به شکل:
+    # 💊 نام دارو
+    if not text.startswith("💊"):
+        return None
 
-    name = text[2:].strip()
+    # حذف ایموجی و فاصله‌های اضافی
+    name = text.replace("💊", "", 1).strip()
 
+    if not name:
+        return None
 
     with get_db_connection() as conn:
 
@@ -1195,7 +1217,7 @@ def get_medication_by_button(
 
                 WHERE user_id = %s
 
-                AND name = %s
+                AND TRIM(name) = TRIM(%s)
 
                 ORDER BY
                     is_active DESC,
@@ -1207,7 +1229,9 @@ def get_medication_by_button(
                 name
             ))
 
-            return cur.fetchone()
+            row = cur.fetchone()
+
+    return row
 
 
 # =========================================================
@@ -2928,30 +2952,7 @@ def receive_message():
             })
 
 
-        # =====================================================
-        # Medication Button
-        # =====================================================
-
-        medication = get_medication_by_button(
-            user_id,
-            text
-        )
-
-
-        if medication:
-
-            show_medication_management(
-
-                chat_id,
-                user_id,
-                medication[0]
-            )
-
-            return jsonify({
-                "status": "ok"
-            })
-
-
+        
         # =====================================================
         # MEDICATION MANAGEMENT
         # =====================================================
