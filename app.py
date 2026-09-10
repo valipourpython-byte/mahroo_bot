@@ -3038,7 +3038,12 @@ def receive_message():
             )
 
         )
-
+        print("========== MESSAGE DEBUG ==========")
+        print("USER ID:", repr(user_id))
+        print("TEXT:", repr(text))
+        print("STATE:", repr(state))
+        print("SESSION DATA:", repr(session_data))
+        print("===================================")
         if not state:
 
             state = "MAIN_MENU"
