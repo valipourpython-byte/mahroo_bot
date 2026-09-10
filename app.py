@@ -199,15 +199,10 @@ MAIN_MENU_BUTTONS = [
 def send_message(chat_id, text, buttons=None):
 
     if not BALE_API:
-
-        print(
-            "ERROR: BALE_BOT_TOKEN is not set"
-        )
-
+        print("ERROR: BALE_BOT_TOKEN is not set")
         return None
 
     if not text:
-
         text = "پاسخی برای نمایش وجود ندارد."
 
     # -----------------------------------------------------
@@ -215,23 +210,29 @@ def send_message(chat_id, text, buttons=None):
     # -----------------------------------------------------
 
     if len(text) > MAX_BALE_MESSAGE_LENGTH:
-
-        text = (
-            text[:MAX_BALE_MESSAGE_LENGTH]
-            + "\n\n…"
-        )
+        text = text[:MAX_BALE_MESSAGE_LENGTH] + "\n\n…"
 
     # -----------------------------------------------------
-    # Keyboard
+    # PERSISTENT MAIN MENU
     #
-    # If buttons are supplied, use them.
-    # Otherwise always show the main menu.
+    # Main menu is ALWAYS kept at the bottom.
+    # If extra buttons are supplied, they appear ABOVE it.
     # -----------------------------------------------------
 
-    keyboard = buttons if buttons else MAIN_MENU_BUTTONS
+    keyboard = []
+
+    if buttons:
+        for row in buttons:
+            if row not in keyboard:
+                keyboard.append(row)
+
+    # Add main menu at the bottom
+    for row in MAIN_MENU_BUTTONS:
+        if row not in keyboard:
+            keyboard.append(row)
 
     payload = {
-        "chat_id": chat_id,
+        "chat_id": str(chat_id),
         "text": text,
         "reply_markup": {
             "keyboard": keyboard,
@@ -253,11 +254,13 @@ def send_message(chat_id, text, buttons=None):
             response.text
         )
 
-        # HTTP error
         if not response.ok:
+            print(
+                "Bale HTTP error:",
+                response.status_code
+            )
             return None
 
-        # Bale API-level error
         try:
 
             data = response.json()
@@ -267,14 +270,18 @@ def send_message(chat_id, text, buttons=None):
                 if data.get("ok") is False:
 
                     print(
-                        "Bale API returned ok=false"
+                        "Bale API returned ok=false:",
+                        data
                     )
 
                     return None
 
-        except Exception:
+        except Exception as e:
 
-            pass
+            print(
+                "Bale response JSON error:",
+                repr(e)
+            )
 
         return response
 
@@ -286,7 +293,6 @@ def send_message(chat_id, text, buttons=None):
         )
 
         return None
-
 
 # =========================================================
 # LLM
