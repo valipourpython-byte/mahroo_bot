@@ -70,11 +70,11 @@ def init_database():
         with conn.cursor() as cur:
 
             # -------------------------------------------------
-            # USERS
+            # MAHROO USERS
             # -------------------------------------------------
 
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS users (
+                CREATE TABLE IF NOT EXISTS mahroo_users (
                     id BIGSERIAL PRIMARY KEY,
                     bale_user_id TEXT UNIQUE NOT NULL,
                     chat_id TEXT,
@@ -85,14 +85,14 @@ def init_database():
             """)
 
             # -------------------------------------------------
-            # MEDICATIONS
+            # MAHROO MEDICATIONS
             # -------------------------------------------------
 
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS medications (
+                CREATE TABLE IF NOT EXISTS mahroo_medications (
                     id BIGSERIAL PRIMARY KEY,
                     user_id BIGINT NOT NULL
-                        REFERENCES users(id)
+                        REFERENCES mahroo_users(id)
                         ON DELETE CASCADE,
                     name TEXT NOT NULL,
                     doses_per_day INTEGER,
@@ -104,14 +104,14 @@ def init_database():
             """)
 
             # -------------------------------------------------
-            # MEDICATION SCHEDULES
+            # MAHROO MEDICATION SCHEDULES
             # -------------------------------------------------
 
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS medication_schedules (
+                CREATE TABLE IF NOT EXISTS mahroo_medication_schedules (
                     id BIGSERIAL PRIMARY KEY,
                     medication_id BIGINT NOT NULL
-                        REFERENCES medications(id)
+                        REFERENCES mahroo_medications(id)
                         ON DELETE CASCADE,
                     scheduled_time TEXT NOT NULL,
                     active BOOLEAN DEFAULT TRUE,
@@ -120,13 +120,13 @@ def init_database():
             """)
 
             # -------------------------------------------------
-            # USER SESSIONS
+            # MAHROO USER SESSIONS
             # -------------------------------------------------
 
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS user_sessions (
+                CREATE TABLE IF NOT EXISTS mahroo_user_sessions (
                     user_id BIGINT PRIMARY KEY
-                        REFERENCES users(id)
+                        REFERENCES mahroo_users(id)
                         ON DELETE CASCADE,
                     state TEXT NOT NULL,
                     data JSONB DEFAULT '{}'::jsonb,
@@ -135,115 +135,81 @@ def init_database():
             """)
 
             # -------------------------------------------------
-            # REMINDER OCCURRENCES
+            # MAHROO REMINDER OCCURRENCES
             # -------------------------------------------------
 
             cur.execute("""
-                CREATE TABLE IF NOT EXISTS reminder_occurrences (
+                CREATE TABLE IF NOT EXISTS mahroo_reminder_occurrences (
                     id BIGSERIAL PRIMARY KEY,
+
                     medication_id BIGINT NOT NULL
-                        REFERENCES medications(id)
+                        REFERENCES mahroo_medications(id)
                         ON DELETE CASCADE,
+
                     schedule_id BIGINT NOT NULL
-                        REFERENCES medication_schedules(id)
+                        REFERENCES mahroo_medication_schedules(id)
                         ON DELETE CASCADE,
-                    user_id BIGINT
-                        REFERENCES users(id)
+
+                    user_id BIGINT NOT NULL
+                        REFERENCES mahroo_users(id)
                         ON DELETE CASCADE,
+
                     scheduled_for TIMESTAMP NOT NULL,
+
                     status TEXT NOT NULL DEFAULT 'pending',
+
                     sent_at TIMESTAMP,
                     snoozed_until TIMESTAMP,
                     taken_at TIMESTAMP,
                     not_taken_at TIMESTAMP,
+
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
             """)
 
             # -------------------------------------------------
-            # MIGRATION FOR OLD DATABASE
-            # -------------------------------------------------
-            # اگر reminder_occurrences از نسخه قدیمی وجود داشته
-            # باشد، ممکن است user_id در آن وجود نداشته باشد.
-            # در این صورت ستون را اضافه می‌کنیم.
-
-            cur.execute("""
-                ALTER TABLE reminder_occurrences
-                ADD COLUMN IF NOT EXISTS user_id BIGINT;
-            """)
-
-            # -------------------------------------------------
-            # FILL user_id FOR OLD REMINDERS
-            # -------------------------------------------------
-            # برای رکوردهای قدیمی، user_id را از medication
-            # مربوطه پیدا می‌کنیم.
-
-            cur.execute("""
-                UPDATE reminder_occurrences ro
-                SET user_id = m.user_id
-                FROM medications m
-                WHERE ro.medication_id = m.id
-                  AND ro.user_id IS NULL;
-            """)
-
-            # -------------------------------------------------
-            # ADD FOREIGN KEY IF NEEDED
+            # INDEXES
             # -------------------------------------------------
 
             cur.execute("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1
-                        FROM pg_constraint
-                        WHERE conname = 'reminder_occurrences_user_id_fkey'
-                    ) THEN
-                        ALTER TABLE reminder_occurrences
-                        ADD CONSTRAINT reminder_occurrences_user_id_fkey
-                        FOREIGN KEY (user_id)
-                        REFERENCES users(id)
-                        ON DELETE CASCADE;
-                    END IF;
-                END
-                $$;
-            """)
-
-            # -------------------------------------------------
-            # MAKE user_id REQUIRED
-            # -------------------------------------------------
-
-            cur.execute("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1
-                        FROM reminder_occurrences
-                        WHERE user_id IS NULL
-                    ) THEN
-                        ALTER TABLE reminder_occurrences
-                        ALTER COLUMN user_id SET NOT NULL;
-                    END IF;
-                END
-                $$;
+                CREATE INDEX IF NOT EXISTS
+                idx_mahroo_medications_user
+                ON mahroo_medications(user_id);
             """)
 
             cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_reminder_occurrences_user
-                ON reminder_occurrences(user_id);
+                CREATE INDEX IF NOT EXISTS
+                idx_mahroo_schedules_medication
+                ON mahroo_medication_schedules(medication_id);
             """)
 
             cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_reminder_occurrences_status
-                ON reminder_occurrences(status);
+                CREATE INDEX IF NOT EXISTS
+                idx_mahroo_sessions_user
+                ON mahroo_user_sessions(user_id);
             """)
 
             cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_reminder_occurrences_scheduled
-                ON reminder_occurrences(scheduled_for);
+                CREATE INDEX IF NOT EXISTS
+                idx_mahroo_reminders_user
+                ON mahroo_reminder_occurrences(user_id);
+            """)
+
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS
+                idx_mahroo_reminders_status
+                ON mahroo_reminder_occurrences(status);
+            """)
+
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS
+                idx_mahroo_reminders_scheduled
+                ON mahroo_reminder_occurrences(scheduled_for);
             """)
 
             conn.commit()
 
+            print("Mahroo database initialization completed successfully.")
 
 # =========================================================
 # MAIN / PERSISTENT MENU
