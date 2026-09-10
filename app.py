@@ -116,7 +116,6 @@ def init_database():
                     );
                 """)
 
-                # برای دیتابیس‌های قدیمی
                 cur.execute("""
                     ALTER TABLE medications
                     ADD COLUMN IF NOT EXISTS is_active BOOLEAN
@@ -128,7 +127,6 @@ def init_database():
                     ADD COLUMN IF NOT EXISTS ended_at TIMESTAMP;
                 """)
 
-                # اگر رکوردهای قدیمی NULL داشته باشند
                 cur.execute("""
                     UPDATE medications
                     SET is_active = TRUE
@@ -367,26 +365,7 @@ def get_or_create_user(user):
         "display_name": row[1]
     }
 
-# =====================================================
-# Medication Button
-# =====================================================
 
-medication = get_medication_by_button(
-    user_id,
-    text
-)
-
-if medication:
-
-    show_medication_management(
-        chat_id,
-        user_id,
-        medication[0]
-    )
-
-    return jsonify({
-        "status": "ok"
-    })
 # =========================================================
 # Session
 # =========================================================
@@ -581,6 +560,506 @@ def schedule_to_datetime(
 
 
 # =========================================================
+# Drug Database Search
+# =========================================================
+
+def clean_drug_text(text):
+
+    if not text:
+        return ""
+
+    text = text.strip()
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text
+    )
+
+    return text
+
+
+def search_drug_database(drug_name):
+
+    drug_name = clean_drug_text(
+        drug_name
+    )
+
+    if not drug_name:
+        return None
+
+
+    with get_db_connection() as conn:
+
+        with conn.cursor() as cur:
+
+            # =================================================
+            # 1. Search generic drug
+            # =================================================
+
+            cur.execute("""
+                SELECT
+                    generic_rxcui,
+                    generic_tty,
+                    generic_name
+
+                FROM drugs
+
+                WHERE
+                    LOWER(TRIM(generic_name))
+                    =
+                    LOWER(TRIM(%s))
+
+                LIMIT 1;
+            """, (
+                drug_name,
+            ))
+
+            drug = cur.fetchone()
+
+
+            # =================================================
+            # 2. اگر تطابق دقیق نبود، جستجوی جزئی
+            # =================================================
+
+            if not drug:
+
+                cur.execute("""
+                    SELECT
+                        generic_rxcui,
+                        generic_tty,
+                        generic_name
+
+                    FROM drugs
+
+                    WHERE
+                        generic_name ILIKE %s
+
+                    ORDER BY
+                        LENGTH(generic_name)
+
+                    LIMIT 1;
+                """, (
+                    f"%{drug_name}%",
+                ))
+
+                drug = cur.fetchone()
+
+
+            if not drug:
+
+                return None
+
+
+            generic_rxcui = drug[0]
+            generic_tty = drug[1]
+            generic_name = drug[2]
+
+
+            result = {
+
+                "generic_rxcui":
+                    generic_rxcui,
+
+                "generic_tty":
+                    generic_tty,
+
+                "generic_name":
+                    generic_name,
+
+                "products": [],
+
+                "indications": [],
+
+                "side_effects": [],
+
+                "contraindications": [],
+
+                "warnings": [],
+
+                "precautions": [],
+
+                "interactions": []
+            }
+
+
+            # =================================================
+            # Products
+            # =================================================
+
+            cur.execute("""
+                SELECT
+                    product_rxcui,
+                    product_name
+
+                FROM drug_products
+
+                WHERE generic_rxcui = %s
+
+                ORDER BY product_name
+
+                LIMIT 10;
+            """, (
+                generic_rxcui,
+            ))
+
+            products = cur.fetchall()
+
+
+            for row in products:
+
+                result["products"].append({
+                    "rxcui": row[0],
+                    "name": row[1]
+                })
+
+
+            # =================================================
+            # Helper برای خواندن اطلاعات متنی
+            # =================================================
+
+            def get_text_values(
+                table_name,
+                generic_column="generic_rxcui"
+            ):
+
+                try:
+
+                    cur.execute(
+                        f"""
+                        SELECT *
+                        FROM {table_name}
+                        WHERE {generic_column} = %s
+                        LIMIT 100;
+                        """,
+                        (
+                            generic_rxcui,
+                        )
+                    )
+
+                    rows = cur.fetchall()
+
+                    columns = [
+                        desc.name
+                        for desc in cur.description
+                    ]
+
+                    values = []
+
+                    for row in rows:
+
+                        parts = []
+
+                        for index, value in enumerate(row):
+
+                            column = columns[index]
+
+                            if column == "id":
+                                continue
+
+                            if value is None:
+                                continue
+
+                            if isinstance(
+                                value,
+                                (int, float, bool)
+                            ):
+                                continue
+
+                            value = str(value).strip()
+
+                            if not value:
+                                continue
+
+                            parts.append(value)
+
+
+                        if parts:
+
+                            values.append(
+                                " | ".join(parts)
+                            )
+
+
+                    return values[:20]
+
+                except Exception as e:
+
+                    print(
+                        f"Drug table read error "
+                        f"{table_name}:",
+                        repr(e)
+                    )
+
+                    return []
+
+
+            # =================================================
+            # Indications
+            # =================================================
+
+            result["indications"] = get_text_values(
+                "drug_indications"
+            )
+
+
+            # =================================================
+            # Side Effects
+            # =================================================
+
+            result["side_effects"] = get_text_values(
+                "drug_side_effects"
+            )
+
+
+            # =================================================
+            # Contraindications
+            # =================================================
+
+            result["contraindications"] = get_text_values(
+                "drug_contraindications"
+            )
+
+
+            # =================================================
+            # Warnings
+            # =================================================
+
+            result["warnings"] = get_text_values(
+                "drug_warnings"
+            )
+
+
+            # =================================================
+            # Precautions
+            # =================================================
+
+            result["precautions"] = get_text_values(
+                "drug_precautions"
+            )
+
+
+            # =================================================
+            # Interactions
+            # =================================================
+
+            result["interactions"] = get_text_values(
+                "drug_interactions"
+            )
+
+
+            return result
+
+
+def format_drug_result(drug):
+
+    if not drug:
+        return None
+
+
+    text = (
+        "💊 اطلاعات دارو\n\n"
+        f"نام دارو: {drug['generic_name']}\n"
+    )
+
+
+    if drug.get("generic_tty"):
+
+        text += (
+            f"نوع: {drug['generic_tty']}\n"
+        )
+
+
+    if drug.get("generic_rxcui"):
+
+        text += (
+            f"RxCUI: {drug['generic_rxcui']}\n"
+        )
+
+
+    # =====================================================
+    # Products
+    # =====================================================
+
+    products = drug.get(
+        "products",
+        []
+    )
+
+    if products:
+
+        text += "\n📦 فرآورده‌ها:\n"
+
+        for product in products[:5]:
+
+            name = product.get(
+                "name"
+            )
+
+            if name:
+
+                text += (
+                    f"• {name}\n"
+                )
+
+
+    # =====================================================
+    # Indications
+    # =====================================================
+
+    indications = drug.get(
+        "indications",
+        []
+    )
+
+    if indications:
+
+        text += "\n🩺 موارد مصرف:\n"
+
+        for item in indications[:5]:
+
+            text += (
+                f"• {item}\n"
+            )
+
+
+    # =====================================================
+    # Side Effects
+    # =====================================================
+
+    side_effects = drug.get(
+        "side_effects",
+        []
+    )
+
+    if side_effects:
+
+        text += "\n⚠️ عوارض جانبی:\n"
+
+        for item in side_effects[:5]:
+
+            text += (
+                f"• {item}\n"
+            )
+
+
+    # =====================================================
+    # Contraindications
+    # =====================================================
+
+    contraindications = drug.get(
+        "contraindications",
+        []
+    )
+
+    if contraindications:
+
+        text += "\n🚫 موارد منع مصرف:\n"
+
+        for item in contraindications[:5]:
+
+            text += (
+                f"• {item}\n"
+            )
+
+
+    # =====================================================
+    # Warnings
+    # =====================================================
+
+    warnings = drug.get(
+        "warnings",
+        []
+    )
+
+    if warnings:
+
+        text += "\n⚠️ هشدارها:\n"
+
+        for item in warnings[:5]:
+
+            text += (
+                f"• {item}\n"
+            )
+
+
+    # =====================================================
+    # Precautions
+    # =====================================================
+
+    precautions = drug.get(
+        "precautions",
+        []
+    )
+
+    if precautions:
+
+        text += "\n🔸 احتیاط‌ها:\n"
+
+        for item in precautions[:5]:
+
+            text += (
+                f"• {item}\n"
+            )
+
+
+    # =====================================================
+    # Interactions
+    # =====================================================
+
+    interactions = drug.get(
+        "interactions",
+        []
+    )
+
+    if interactions:
+
+        text += "\n🔄 تداخلات:\n"
+
+        for item in interactions[:5]:
+
+            text += (
+                f"• {item}\n"
+            )
+
+
+    text += (
+        "\n\nℹ️ این اطلاعات از پایگاه داده "
+        "دارویی مهرور استخراج شده است."
+    )
+
+
+    return text
+
+
+def start_drug_search(
+    chat_id,
+    user_id
+):
+
+    set_session(
+        user_id,
+        "ASK_DRUG_SEARCH",
+        {}
+    )
+
+
+    send_message(
+
+        chat_id,
+
+        "🔎 جستجوی دارو\n\n"
+
+        "نام دارو را وارد کن.\n\n"
+
+        "مثلاً:\n"
+        "acetaminophen\n"
+        "paracetamol\n"
+        "ibuprofen"
+    )
+
+
+# =========================================================
 # Main Menu
 # =========================================================
 
@@ -607,6 +1086,8 @@ def main_menu(
             ["➕ افزودن دارو"],
 
             ["💊 داروهای من"],
+
+            ["🔎 جستجوی دارو"],
 
             ["❌ لغو"]
         ]
@@ -688,10 +1169,6 @@ def show_dashboard(
 
         with conn.cursor() as cur:
 
-            # ---------------------------------------------
-            # داروهای فعال
-            # ---------------------------------------------
-
             cur.execute("""
                 SELECT COUNT(*)
 
@@ -706,10 +1183,6 @@ def show_dashboard(
 
             active_count = cur.fetchone()[0]
 
-
-            # ---------------------------------------------
-            # وضعیت امروز
-            # ---------------------------------------------
 
             cur.execute("""
                 SELECT
@@ -756,10 +1229,6 @@ def show_dashboard(
             not_taken_count = row[1] or 0
             pending_count = row[2] or 0
 
-
-            # ---------------------------------------------
-            # نوبت بعدی
-            # ---------------------------------------------
 
             cur.execute("""
                 SELECT
@@ -846,6 +1315,8 @@ def show_dashboard(
             ["💊 داروهای من"],
 
             ["➕ افزودن دارو"],
+
+            ["🔎 جستجوی دارو"],
 
             ["↩️ منوی اصلی"]
         ]
@@ -1072,6 +1543,8 @@ def show_medications(
 
                         ["➕ افزودن دارو"],
 
+                        ["🔎 جستجوی دارو"],
+
                         ["↩️ منوی اصلی"]
                     ]
                 )
@@ -1152,7 +1625,6 @@ def show_medications(
                 text += "\n"
 
 
-                # دکمه برای مدیریت دارو
                 buttons.append([
                     f"💊 {name}"
                 ])
@@ -1167,6 +1639,8 @@ def show_medications(
     buttons.extend([
 
         ["➕ افزودن دارو"],
+
+        ["🔎 جستجوی دارو"],
 
         ["↩️ منوی اصلی"]
     ])
@@ -1186,21 +1660,29 @@ def show_medications(
 # Get User Medication By Button Text
 # =========================================================
 
-def get_medication_by_button(user_id, text):
+def get_medication_by_button(
+    user_id,
+    text
+):
 
     if not text:
         return None
 
-    # دکمه‌های دارو به شکل:
-    # 💊 نام دارو
+
     if not text.startswith("💊"):
         return None
 
-    # حذف ایموجی و فاصله‌های اضافی
-    name = text.replace("💊", "", 1).strip()
+
+    name = text.replace(
+        "💊",
+        "",
+        1
+    ).strip()
+
 
     if not name:
         return None
+
 
     with get_db_connection() as conn:
 
@@ -1230,6 +1712,7 @@ def get_medication_by_button(user_id, text):
             ))
 
             row = cur.fetchone()
+
 
     return row
 
@@ -1415,10 +1898,6 @@ def end_medication(
 
         with conn.cursor() as cur:
 
-            # ---------------------------------------------
-            # غیرفعال کردن دارو
-            # ---------------------------------------------
-
             cur.execute("""
                 UPDATE medications
 
@@ -1437,10 +1916,6 @@ def end_medication(
                 user_id
             ))
 
-
-            # ---------------------------------------------
-            # توقف Reminderهای فعال امروز و آینده
-            # ---------------------------------------------
 
             cur.execute("""
                 UPDATE reminder_occurrences ro
@@ -1634,10 +2109,6 @@ def save_changed_times(
 
         with conn.cursor() as cur:
 
-            # -------------------------------------------------
-            # اول scheduleهای قبلی را پیدا می‌کنیم
-            # -------------------------------------------------
-
             cur.execute("""
                 SELECT id
 
@@ -1653,11 +2124,6 @@ def save_changed_times(
                 for row in cur.fetchall()
             ]
 
-
-            # -------------------------------------------------
-            # occurrenceهای مربوط به scheduleهای قدیمی
-            # دیگر معتبر نیستند
-            # -------------------------------------------------
 
             if old_schedule_ids:
 
@@ -1680,10 +2146,6 @@ def save_changed_times(
                 ))
 
 
-            # -------------------------------------------------
-            # حذف scheduleهای قبلی
-            # -------------------------------------------------
-
             cur.execute("""
                 DELETE FROM medication_schedules
 
@@ -1692,10 +2154,6 @@ def save_changed_times(
                 medication_id,
             ))
 
-
-            # -------------------------------------------------
-            # ثبت ساعت‌های جدید
-            # -------------------------------------------------
 
             for index, time in enumerate(
                 times,
@@ -1720,10 +2178,6 @@ def save_changed_times(
                     time
                 ))
 
-
-            # -------------------------------------------------
-            # تعداد دفعات مصرف
-            # -------------------------------------------------
 
             cur.execute("""
                 UPDATE medications
@@ -1973,10 +2427,8 @@ def handle_reminder_action(
             chat_id,
 
             f"✅ ثبت شد.\n\n"
-
             f"مصرف «{medication_name}» "
             "انجام‌شده ثبت شد. 💚\n\n"
-
             "برای این نوبت دیگر یادآوری نمی‌کنم.",
 
             buttons=[
@@ -2005,10 +2457,8 @@ def handle_reminder_action(
             chat_id,
 
             f"ثبت شد. ❌\n\n"
-
             f"نوبت «{medication_name}» "
             "مصرف‌نشده ثبت شد.\n\n"
-
             "برای این نوبت دیگر یادآوری نمی‌کنم."
         )
 
@@ -2033,10 +2483,8 @@ def handle_reminder_action(
             chat_id,
 
             f"باشه 🌱\n\n"
-
             f"یادآوری «{medication_name}» "
             f"برای ساعت {time_text} تنظیم شد.\n\n"
-
             "۵ دقیقه دیگه دوباره یادآوری می‌کنم. ⏰",
 
             buttons=[
@@ -2110,7 +2558,6 @@ def create_due_occurrences(
             continue
 
 
-        # فقط بازه 10 دقیقه گذشته تا همین لحظه
         if not (
             window_start
             <= scheduled_datetime
@@ -2323,6 +2770,7 @@ def send_normal_reminder(
     )
 
 
+    # فقط در صورت موفقیت واقعی Bale وضعیت را sent می‌کنیم
     if response and response.ok:
 
         cur.execute("""
@@ -2344,6 +2792,12 @@ def send_normal_reminder(
 
         return True
 
+
+    # اگر ارسال شکست خورد، Reminder همچنان pending می‌ماند
+    print(
+        "Reminder was NOT marked as sent:",
+        reminder_id
+    )
 
     return False
 
@@ -2431,6 +2885,11 @@ def send_snoozed_reminder(
         return True
 
 
+    print(
+        "Snoozed reminder was NOT marked as sent:",
+        reminder_id
+    )
+
     return False
 
 
@@ -2462,30 +2921,16 @@ def check_reminders():
 
             with conn.cursor() as cur:
 
-                # ---------------------------------------------
-                # Create due occurrences
-                # ---------------------------------------------
-
                 created_count = create_due_occurrences(
-
                     cur,
-
                     today,
-
                     now
                 )
 
 
-                # ---------------------------------------------
-                # Normal reminders
-                # ---------------------------------------------
-
                 reminders = get_pending_reminders(
-
                     cur,
-
                     today,
-
                     now
                 )
 
@@ -2504,10 +2949,6 @@ def check_reminders():
 
                         error_count += 1
 
-
-                # ---------------------------------------------
-                # Snoozed reminders
-                # ---------------------------------------------
 
                 cur.execute("""
                     SELECT
@@ -2916,6 +3357,22 @@ def receive_message():
                 })
 
 
+            # =================================================
+            # Drug Search
+            # =================================================
+
+            if text == "🔎 جستجوی دارو":
+
+                start_drug_search(
+                    chat_id,
+                    user_id
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+
             if text == "↩️ منوی اصلی":
 
                 start_conversation(
@@ -2942,6 +3399,8 @@ def receive_message():
 
                     ["💊 داروهای من"],
 
+                    ["🔎 جستجوی دارو"],
+
                     ["❌ لغو"]
                 ]
             )
@@ -2952,7 +3411,136 @@ def receive_message():
             })
 
 
-        
+        # =====================================================
+        # DRUG SEARCH
+        # =====================================================
+
+        if state == "ASK_DRUG_SEARCH":
+
+            if not text:
+
+                send_message(
+                    chat_id,
+                    "لطفاً نام دارو را وارد کن."
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+
+            try:
+
+                drug = search_drug_database(
+                    text
+                )
+
+
+                if not drug:
+
+                    send_message(
+
+                        chat_id,
+
+                        f"❌ داروی «{text}» "
+                        "در پایگاه داده پیدا نشد.\n\n"
+
+                        "نام دارو را دوباره وارد کن.\n"
+                        "مثلاً:\n"
+                        "acetaminophen"
+                    )
+
+                    return jsonify({
+                        "status": "ok"
+                    })
+
+
+                drug_text = format_drug_result(
+                    drug
+                )
+
+
+                send_message(
+
+                    chat_id,
+
+                    drug_text,
+
+                    buttons=[
+
+                        ["🔎 جستجوی دارو"],
+
+                        ["📊 داشبورد من"],
+
+                        ["↩️ منوی اصلی"]
+                    ]
+                )
+
+
+                # بعد از نمایش نتیجه،
+                # کاربر می‌تواند دوباره دارو جستجو کند.
+                set_session(
+
+                    user_id,
+
+                    "ASK_DRUG_SEARCH",
+
+                    {}
+                )
+
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+
+            except Exception as e:
+
+                print(
+                    "Drug search error:",
+                    repr(e)
+                )
+
+
+                send_message(
+
+                    chat_id,
+
+                    "❌ هنگام دریافت اطلاعات دارو "
+                    "خطایی رخ داد.\n\n"
+
+                    "لطفاً دوباره تلاش کن."
+                )
+
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+
+        # =====================================================
+        # MEDICATION BUTTON
+        # =====================================================
+
+        medication = get_medication_by_button(
+            user_id,
+            text
+        )
+
+
+        if medication:
+
+            show_medication_management(
+                chat_id,
+                user_id,
+                medication[0]
+            )
+
+            return jsonify({
+                "status": "ok"
+            })
+
+
         # =====================================================
         # MEDICATION MANAGEMENT
         # =====================================================
@@ -2963,10 +3551,6 @@ def receive_message():
                 "medication_id"
             )
 
-
-            # ---------------------------------------------
-            # تغییر ساعت
-            # ---------------------------------------------
 
             if text == "✏️ تغییر ساعت مصرف":
 
@@ -2981,10 +3565,6 @@ def receive_message():
                     "status": "ok"
                 })
 
-
-            # ---------------------------------------------
-            # پایان مصرف
-            # ---------------------------------------------
 
             if text == "🛑 پایان مصرف دارو":
 
@@ -3072,10 +3652,6 @@ def receive_message():
                 })
 
 
-            # ---------------------------------------------
-            # فعال کردن دوباره
-            # ---------------------------------------------
-
             if text == "🟢 فعال کردن دوباره":
 
                 reactivate_medication(
@@ -3115,10 +3691,6 @@ def receive_message():
                 })
 
 
-            # ---------------------------------------------
-            # حذف دارو
-            # ---------------------------------------------
-
             if text == "🗑 حذف دارو":
 
                 set_session(
@@ -3157,10 +3729,6 @@ def receive_message():
                     "status": "ok"
                 })
 
-
-            # ---------------------------------------------
-            # برگشت به داروها
-            # ---------------------------------------------
 
             if text == "↩️ داروهای من":
 
@@ -3749,7 +4317,9 @@ def receive_message():
 
                         ["➕ افزودن دارو"],
 
-                        ["💊 داروهای من"]
+                        ["💊 داروهای من"],
+
+                        ["🔎 جستجوی دارو"]
                     ]
                 )
 
