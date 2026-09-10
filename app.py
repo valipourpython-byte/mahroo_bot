@@ -541,82 +541,82 @@ def ask_llm(
     }
     try:
 
-    print("========== ASK_LLM CALLED ==========")
-    print("Question:", repr(user_question))
-    print("Model:", OPENROUTER_MODEL)
-    print("API KEY EXISTS:", bool(OPENROUTER_API_KEY))
-    print("Context length:", len(drug_context or ""))
-    print("====================================")
-
-    response = requests.post(
-
-        "https://openrouter.ai/api/v1/chat/completions",
-
-        headers=headers,
-
-        json=payload,
-
-        timeout=60
-    )
-
-    print(
-        "========== OPENROUTER RESPONSE =========="
-    )
-    print("Status code:", response.status_code)
-    print("Response:", response.text[:3000])
-    print(
-        "=========================================="
-    )
-
-    if not response.ok:
-
-        print(
-            "OpenRouter error:",
-            response.status_code,
-            response.text
+        print("========== ASK_LLM CALLED ==========")
+        print("Question:", repr(user_question))
+        print("Model:", OPENROUTER_MODEL)
+        print("API KEY EXISTS:", bool(OPENROUTER_API_KEY))
+        print("Context length:", len(drug_context or ""))
+        print("====================================")
+    
+        response = requests.post(
+    
+            "https://openrouter.ai/api/v1/chat/completions",
+    
+            headers=headers,
+    
+            json=payload,
+    
+            timeout=60
         )
-
-        return None
-
-    data = response.json()
-
-    choices = data.get(
-        "choices",
-        []
-    )
-
-    if not choices:
-
+    
         print(
-            "OpenRouter returned no choices"
+            "========== OPENROUTER RESPONSE =========="
         )
-
-        return None
-
-    answer = (
-        choices[0]
-        .get("message", {})
-        .get("content")
-    )
-
-    if not answer:
-
+        print("Status code:", response.status_code)
+        print("Response:", response.text[:3000])
         print(
-            "OpenRouter returned empty answer"
+            "=========================================="
         )
-
+    
+        if not response.ok:
+    
+            print(
+                "OpenRouter error:",
+                response.status_code,
+                response.text
+            )
+    
+            return None
+    
+        data = response.json()
+    
+        choices = data.get(
+            "choices",
+            []
+        )
+    
+        if not choices:
+    
+            print(
+                "OpenRouter returned no choices"
+            )
+    
+            return None
+    
+        answer = (
+            choices[0]
+            .get("message", {})
+            .get("content")
+        )
+    
+        if not answer:
+    
+            print(
+                "OpenRouter returned empty answer"
+            )
+    
+            return None
+    
+        return answer.strip()
+    
+    except Exception as e:
+    
+        print(
+            "OpenRouter exception:",
+            repr(e)
+        )
+    
         return None
-
-    return answer.strip()
-
-except Exception as e:
-
-    print(
-        "OpenRouter exception:",
-        repr(e)
-    )
-
-    return None
     
 
 # =========================================================
