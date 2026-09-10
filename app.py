@@ -147,7 +147,7 @@ def init_database():
                     schedule_id BIGINT NOT NULL
                         REFERENCES medication_schedules(id)
                         ON DELETE CASCADE,
-                    user_id BIGINT NOT NULL
+                    user_id BIGINT
                         REFERENCES users(id)
                         ON DELETE CASCADE,
                     scheduled_for TIMESTAMP NOT NULL,
@@ -158,6 +158,73 @@ def init_database():
                     not_taken_at TIMESTAMP,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 );
+            """)
+
+            # -------------------------------------------------
+            # MIGRATION FOR OLD DATABASE
+            # -------------------------------------------------
+            # اگر reminder_occurrences از نسخه قدیمی وجود داشته
+            # باشد، ممکن است user_id در آن وجود نداشته باشد.
+            # در این صورت ستون را اضافه می‌کنیم.
+
+            cur.execute("""
+                ALTER TABLE reminder_occurrences
+                ADD COLUMN IF NOT EXISTS user_id BIGINT;
+            """)
+
+            # -------------------------------------------------
+            # FILL user_id FOR OLD REMINDERS
+            # -------------------------------------------------
+            # برای رکوردهای قدیمی، user_id را از medication
+            # مربوطه پیدا می‌کنیم.
+
+            cur.execute("""
+                UPDATE reminder_occurrences ro
+                SET user_id = m.user_id
+                FROM medications m
+                WHERE ro.medication_id = m.id
+                  AND ro.user_id IS NULL;
+            """)
+
+            # -------------------------------------------------
+            # ADD FOREIGN KEY IF NEEDED
+            # -------------------------------------------------
+
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_constraint
+                        WHERE conname = 'reminder_occurrences_user_id_fkey'
+                    ) THEN
+                        ALTER TABLE reminder_occurrences
+                        ADD CONSTRAINT reminder_occurrences_user_id_fkey
+                        FOREIGN KEY (user_id)
+                        REFERENCES users(id)
+                        ON DELETE CASCADE;
+                    END IF;
+                END
+                $$;
+            """)
+
+            # -------------------------------------------------
+            # MAKE user_id REQUIRED
+            # -------------------------------------------------
+
+            cur.execute("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM reminder_occurrences
+                        WHERE user_id IS NULL
+                    ) THEN
+                        ALTER TABLE reminder_occurrences
+                        ALTER COLUMN user_id SET NOT NULL;
+                    END IF;
+                END
+                $$;
             """)
 
             cur.execute("""
