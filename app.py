@@ -3215,206 +3215,255 @@ def receive_message():
         # AI DRUG QUESTION STATE
         # =================================================
 
+        
+
         if state == "ASK_DRUG_QUESTION":
-
+        
             if not text:
-
+        
                 send_message(
-
                     chat_id,
-
                     "💬 لطفاً سؤال دارویی خود را بنویسید.",
-
                     MAIN_MENU_BUTTONS
-
                 )
-
+        
                 return jsonify({
                     "status": "ok"
                 })
-
+        
             print(
-                "AI QUESTION:",
-                text
+                "========================================"
             )
-
+            print(
+                "AI QUESTION RECEIVED"
+            )
+            print(
+                "Question:",
+                repr(text)
+            )
+            print(
+                "User ID:",
+                user_id
+            )
+            print(
+                "========================================"
+            )
+        
             try:
-
+        
                 # -------------------------------------------------
-                # Find drugs
+                # STEP 1: FIND DRUGS
                 # -------------------------------------------------
-
-                drugs = (
-                    find_drugs_in_question(
-                        text
-                    )
-                )
-
+        
                 print(
-
+                    "AI STEP 1: Finding drugs..."
+                )
+        
+                drugs = find_drugs_in_question(
+                    text
+                )
+        
+                print(
+                    "AI STEP 1 OK"
+                )
+        
+                print(
                     "Detected drugs:",
-
                     [
-                        d.get(
-                            "generic_name"
-                        )
-
+                        d.get("generic_name")
                         for d in drugs
                     ]
-
                 )
-
+        
                 # -------------------------------------------------
-                # Build context
+                # STEP 2: BUILD CONTEXT
                 # -------------------------------------------------
-
+        
+                print(
+                    "AI STEP 2: Building drug context..."
+                )
+        
                 contexts = []
-
+        
                 for drug in drugs[:3]:
-
-                    context = (
-                        drug_to_context(
-                            drug
-                        )
+        
+                    print(
+                        "Building context for:",
+                        drug.get("generic_name")
                     )
-
+        
+                    context = drug_to_context(
+                        drug
+                    )
+        
                     if context:
-
+        
                         contexts.append(
                             context
                         )
-
+        
                 drug_context = (
-
                     "\n\n"
                     "===================="
                     "\n\n"
-
                 ).join(
                     contexts
                 )
-
+        
                 print(
-
+                    "AI STEP 2 OK"
+                )
+        
+                print(
                     "Drug context length:",
-
                     len(drug_context)
-
                 )
-
+        
                 # -------------------------------------------------
-                # Ask LLM
+                # STEP 3: CALL LLM
                 # -------------------------------------------------
-
+        
+                print(
+                    "AI STEP 3: Calling OpenRouter..."
+                )
+        
                 answer = ask_llm(
-
                     user_question=text,
-
                     drug_context=drug_context
-
                 )
-
+        
+                print(
+                    "AI STEP 3 COMPLETED"
+                )
+        
                 # -------------------------------------------------
                 # LLM ERROR
                 # -------------------------------------------------
-
+        
                 if not answer:
-
+        
+                    print(
+                        "AI ERROR: ask_llm returned None/empty"
+                    )
+        
                     send_message(
-
+        
                         chat_id,
-
+        
                         "❌ متأسفانه در دریافت پاسخ "
                         "از دستیار هوشمند مشکلی پیش آمد.\n\n"
                         "لطفاً چند لحظه بعد دوباره تلاش کنید.",
-
+        
                         MAIN_MENU_BUTTONS
-
+        
                     )
-
+        
                     set_session(
-
+        
                         user_id,
-
+        
                         "ASK_DRUG_QUESTION"
-
+        
                     )
-
+        
                     return jsonify({
                         "status": "ok"
                     })
-
+        
                 # -------------------------------------------------
                 # ANSWER
                 # -------------------------------------------------
-
+        
+                print(
+                    "AI STEP 4: Sending answer..."
+                )
+        
                 answer_text = (
-
                     "🤖 پاسخ مهرو:\n\n"
-
                     + answer
-
                 )
-
+        
                 send_message(
-
+        
                     chat_id,
-
+        
                     answer_text,
-
+        
                     MAIN_MENU_BUTTONS
-
+        
                 )
-
+        
+                print(
+                    "AI STEP 4 OK"
+                )
+        
                 # -------------------------------------------------
-                # Stay in AI question mode
+                # STAY IN AI QUESTION MODE
                 # -------------------------------------------------
-
+        
                 set_session(
-
+        
                     user_id,
-
+        
                     "ASK_DRUG_QUESTION"
-
+        
                 )
-
+        
                 return jsonify({
                     "status": "ok"
                 })
-
+        
             except Exception as e:
-
+        
                 print(
-
-                    "AI drug question error:",
-
-                    repr(e)
-
+                    "========================================"
                 )
-
+        
+                print(
+                    "AI DRUG QUESTION ERROR"
+                )
+        
+                print(
+                    "Error type:",
+                    type(e).__name__
+                )
+        
+                print(
+                    "Error:",
+                    repr(e)
+                )
+        
+                print(
+                    "Question:",
+                    repr(text)
+                )
+        
+                print(
+                    "========================================"
+                )
+        
                 send_message(
-
+        
                     chat_id,
-
+        
                     "❌ هنگام پردازش سؤال مشکلی رخ داد.\n\n"
                     "لطفاً دوباره سؤال خود را ارسال کنید.",
-
+        
                     MAIN_MENU_BUTTONS
-
+        
                 )
-
+        
                 set_session(
-
+        
                     user_id,
-
+        
                     "ASK_DRUG_QUESTION"
-
+        
                 )
-
+        
                 return jsonify({
                     "status": "ok"
                 })
-
         # =================================================
         # DRUG SEARCH STATE
         # =================================================
