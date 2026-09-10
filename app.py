@@ -17,7 +17,11 @@ app = Flask(__name__)
 
 TOKEN = os.getenv("BALE_BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
-
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = os.getenv(
+    "OPENROUTER_MODEL",
+    "inclusionai/ling-3.0-flash-sante:free"
+)
 if TOKEN:
     BALE_API = f"https://tapi.bale.ai/bot{TOKEN}/sendMessage"
 else:
@@ -300,7 +304,95 @@ def send_message(
 
         return None
 
+# =========================================================
+# asl llm
+# =========================================================
+def ask_llm(user_question, drug_context=""):
+    if not OPENROUTER_API_KEY:
+        print("ERROR: OPENROUTER_API_KEY is not configured.")
+        return None
 
+    system_prompt = """
+تو دستیار هوشمند دارویی «مهرو» هستی.
+
+وظیفه تو پاسخ‌گویی فارسی به پرسش‌های کاربران درباره داروها و اطلاعات دارویی است.
+
+قوانین مهم:
+
+1. فقط در حوزه اطلاعات دارویی پاسخ بده.
+2. اگر سؤال کاربر ارتباطی با دارو، مصرف دارو، عوارض، موارد مصرف،
+   تداخلات، هشدارها، منع مصرف، شکل دارویی یا اطلاعات مرتبط با دارو ندارد،
+   پاسخ بده:
+   «این سؤال در حوزه اطلاعات دارویی مهرو نیست.»
+
+3. اطلاعاتی که در CONTEXT ارائه شده را منبع اصلی اطلاعات دارویی در نظر بگیر.
+4. اطلاعاتی را که در CONTEXT وجود ندارد، به عنوان واقعیت قطعی درباره
+   داروی موردنظر اختراع نکن.
+5. پاسخ را به زبان فارسی و برای یک کاربر عادی بنویس.
+6. نام انگلیسی دارو را در صورت مفید بودن داخل پرانتز بیاور.
+7. پاسخ کوتاه، واضح و قابل فهم باشد.
+8. در مسائل پزشکی حساس، از دادن دستور قطعی و شخصی‌سازی‌شده برای
+   تغییر یا قطع دارو خودداری کن و کاربر را به پزشک یا داروساز ارجاع بده.
+"""
+
+    user_prompt = f"""
+سؤال کاربر:
+{user_question}
+
+اطلاعات بازیابی‌شده از پایگاه داده دارویی:
+{drug_context if drug_context else "اطلاعات دارویی مشخصی برای این سؤال پیدا نشد."}
+"""
+
+    payload = {
+        "model": OPENROUTER_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": system_prompt
+            },
+            {
+                "role": "user",
+                "content": user_prompt
+            }
+        ],
+        "temperature": 0.2,
+        "max_tokens": 500
+    }
+
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://htvsai.app",
+        "X-Title": "Mahroo"
+    }
+
+    try:
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=60
+        )
+
+        if not response.ok:
+            print(
+                "OpenRouter error:",
+                response.status_code,
+                response.text
+            )
+            return None
+
+        data = response.json()
+
+        return (
+            data.get("choices", [{}])[0]
+            .get("message", {})
+            .get("content")
+        )
+
+    except Exception as e:
+        print("OpenRouter exception:", repr(e))
+        return None
 # =========================================================
 # User
 # =========================================================
