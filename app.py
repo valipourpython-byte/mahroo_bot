@@ -2422,14 +2422,26 @@ def receive_message():
         # TEXT
         # -------------------------------------------------
 
+        # -------------------------------------------------
+        # TEXT
+        # -------------------------------------------------
+        
         text = (
             message.get("text")
             or message.get("message")
             or ""
         )
-
-        text = clean_drug_text(
-            text
+        
+        # Some Bale updates may contain text in different
+        # forms. Convert safely to string.
+        if not isinstance(text, str):
+            text = str(text)
+        
+        text = clean_drug_text(text)
+        
+        print(
+            "Incoming text:",
+            repr(text)
         )
 
         # =================================================
