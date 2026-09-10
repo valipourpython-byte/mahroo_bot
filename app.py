@@ -8,20 +8,26 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 
+# =========================================================
+# APP
+# =========================================================
+
 app = Flask(__name__)
 
 
 # =========================================================
-# Environment Variables
+# ENVIRONMENT
 # =========================================================
 
 TOKEN = os.getenv("BALE_BOT_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
+
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 OPENROUTER_MODEL = os.getenv(
     "OPENROUTER_MODEL",
     "inclusionai/ling-3.0-flash-sante:free"
 )
+
 if TOKEN:
     BALE_API = f"https://tapi.bale.ai/bot{TOKEN}/sendMessage"
 else:
@@ -29,261 +35,174 @@ else:
 
 
 # =========================================================
-# Settings
+# SETTINGS
 # =========================================================
 
 IRAN_TZ = ZoneInfo("Asia/Tehran")
 
-# Reminder فقط تا حداکثر 10 دقیقه بعد از ساعت تعیین‌شده
 REMINDER_GRACE_MINUTES = 10
-
-# Snooze
 SNOOZE_MINUTES = 5
+
+MAX_BALE_MESSAGE_LENGTH = 3800
 
 
 # =========================================================
-# Database
+# DATABASE CONNECTION
 # =========================================================
 
 def get_db_connection():
-
     if not DATABASE_URL:
-        raise RuntimeError(
-            "DATABASE_URL is not set"
-        )
+        raise RuntimeError("DATABASE_URL is not set")
 
     return psycopg.connect(DATABASE_URL)
 
 
 # =========================================================
-# Initialize Database
+# DATABASE INITIALIZATION
 # =========================================================
 
 def init_database():
 
-    if not DATABASE_URL:
+    with get_db_connection() as conn:
 
-        print("ERROR: DATABASE_URL is not set")
-        return
+        with conn.cursor() as cur:
 
-    try:
+            # -------------------------------------------------
+            # USERS
+            # -------------------------------------------------
 
-        with get_db_connection() as conn:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id BIGSERIAL PRIMARY KEY,
+                    bale_user_id TEXT UNIQUE NOT NULL,
+                    chat_id TEXT,
+                    display_name TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
 
-            with conn.cursor() as cur:
+            # -------------------------------------------------
+            # MEDICATIONS
+            # -------------------------------------------------
 
-                # =================================================
-                # USERS
-                # =================================================
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS medications (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    doses_per_day INTEGER,
+                    number_of_doses INTEGER,
+                    active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
 
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS users (
-                        id SERIAL PRIMARY KEY,
-                        bale_user_id BIGINT UNIQUE NOT NULL,
-                        first_name TEXT,
-                        username TEXT,
-                        display_name TEXT,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
+            # -------------------------------------------------
+            # MEDICATION SCHEDULES
+            # -------------------------------------------------
 
-                cur.execute("""
-                    ALTER TABLE users
-                    ADD COLUMN IF NOT EXISTS display_name TEXT;
-                """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS medication_schedules (
+                    id BIGSERIAL PRIMARY KEY,
+                    medication_id BIGINT NOT NULL
+                        REFERENCES medications(id) ON DELETE CASCADE,
+                    scheduled_time TEXT NOT NULL,
+                    active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
 
+            # -------------------------------------------------
+            # USER SESSIONS
+            # -------------------------------------------------
 
-                # =================================================
-                # MEDICATIONS
-                # =================================================
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS user_sessions (
+                    user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                    state TEXT NOT NULL,
+                    data JSONB DEFAULT '{}'::jsonb,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
 
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS medications (
+            # -------------------------------------------------
+            # REMINDER OCCURRENCES
+            # -------------------------------------------------
 
-                        id SERIAL PRIMARY KEY,
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS reminder_occurrences (
+                    id BIGSERIAL PRIMARY KEY,
+                    medication_id BIGINT NOT NULL
+                        REFERENCES medications(id) ON DELETE CASCADE,
+                    schedule_id BIGINT NOT NULL
+                        REFERENCES medication_schedules(id) ON DELETE CASCADE,
+                    user_id BIGINT NOT NULL
+                        REFERENCES users(id) ON DELETE CASCADE,
+                    scheduled_for TIMESTAMP NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    sent_at TIMESTAMP,
+                    snoozed_until TIMESTAMP,
+                    taken_at TIMESTAMP,
+                    not_taken_at TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """)
 
-                        user_id INTEGER NOT NULL
-                            REFERENCES users(id)
-                            ON DELETE CASCADE,
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reminder_occurrences_user
+                ON reminder_occurrences(user_id);
+            """)
 
-                        name TEXT NOT NULL,
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reminder_occurrences_status
+                ON reminder_occurrences(status);
+            """)
 
-                        times_per_day INTEGER NOT NULL,
-
-                        is_active BOOLEAN NOT NULL
-                            DEFAULT TRUE,
-
-                        created_at TIMESTAMP
-                            DEFAULT CURRENT_TIMESTAMP,
-
-                        ended_at TIMESTAMP
-                    );
-                """)
-
-                cur.execute("""
-                    ALTER TABLE medications
-                    ADD COLUMN IF NOT EXISTS is_active BOOLEAN
-                    DEFAULT TRUE;
-                """)
-
-                cur.execute("""
-                    ALTER TABLE medications
-                    ADD COLUMN IF NOT EXISTS ended_at TIMESTAMP;
-                """)
-
-                cur.execute("""
-                    UPDATE medications
-                    SET is_active = TRUE
-                    WHERE is_active IS NULL;
-                """)
-
-
-                # =================================================
-                # MEDICATION SCHEDULES
-                # =================================================
-
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS medication_schedules (
-
-                        id SERIAL PRIMARY KEY,
-
-                        medication_id INTEGER NOT NULL
-                            REFERENCES medications(id)
-                            ON DELETE CASCADE,
-
-                        dose_number INTEGER NOT NULL,
-
-                        time TEXT NOT NULL
-                    );
-                """)
-
-
-                # =================================================
-                # USER SESSIONS
-                # =================================================
-
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS user_sessions (
-
-                        id SERIAL PRIMARY KEY,
-
-                        user_id INTEGER UNIQUE NOT NULL
-                            REFERENCES users(id)
-                            ON DELETE CASCADE,
-
-                        state TEXT NOT NULL,
-
-                        data TEXT,
-
-                        updated_at TIMESTAMP
-                            DEFAULT CURRENT_TIMESTAMP
-                    );
-                """)
-
-
-                # =================================================
-                # REMINDER OCCURRENCES
-                # =================================================
-
-                cur.execute("""
-                    CREATE TABLE IF NOT EXISTS reminder_occurrences (
-
-                        id SERIAL PRIMARY KEY,
-
-                        medication_schedule_id INTEGER NOT NULL
-                            REFERENCES medication_schedules(id)
-                            ON DELETE CASCADE,
-
-                        reminder_date DATE NOT NULL,
-
-                        scheduled_time TEXT NOT NULL,
-
-                        status TEXT NOT NULL
-                            DEFAULT 'pending',
-
-                        sent_at TIMESTAMP,
-
-                        taken_at TIMESTAMP,
-
-                        not_taken_at TIMESTAMP,
-
-                        snooze_until TIMESTAMP,
-
-                        created_at TIMESTAMP
-                            DEFAULT CURRENT_TIMESTAMP,
-
-                        UNIQUE (
-                            medication_schedule_id,
-                            reminder_date
-                        )
-                    );
-                """)
-
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_reminder_occurrences_scheduled
+                ON reminder_occurrences(scheduled_for);
+            """)
 
             conn.commit()
 
 
-        print(
-            "Database initialized successfully."
-        )
-
-
-    except Exception as e:
-
-        print(
-            "Database initialization error:",
-            repr(e)
-        )
-
-
 # =========================================================
-# Bale
+# BALE SEND MESSAGE
 # =========================================================
 
-def send_message(
-    chat_id,
-    text,
-    buttons=None
-):
+def send_message(chat_id, text, buttons=None):
 
     if not BALE_API:
-
-        print(
-            "ERROR: BALE_BOT_TOKEN is not set"
-        )
-
+        print("ERROR: BALE_BOT_TOKEN is not set")
         return None
 
+    if not text:
+        text = "پاسخی برای نمایش وجود ندارد."
+
+    # Bale message length protection
+    if len(text) > MAX_BALE_MESSAGE_LENGTH:
+        text = text[:MAX_BALE_MESSAGE_LENGTH] + "\n\n…"
 
     payload = {
-
         "chat_id": chat_id,
-
         "text": text
     }
 
-
     if buttons:
-
         payload["reply_markup"] = {
-
             "keyboard": buttons,
-
             "resize_keyboard": True
         }
-
 
     try:
 
         response = requests.post(
-
             BALE_API,
-
             json=payload,
-
             timeout=15
         )
-
 
         print(
             "Bale response:",
@@ -291,9 +210,23 @@ def send_message(
             response.text
         )
 
+        # HTTP-level failure
+        if not response.ok:
+            return None
+
+        # Bale may return HTTP 200 but still report an API error
+        try:
+            data = response.json()
+
+            if isinstance(data, dict):
+                if data.get("ok") is False:
+                    print("Bale API returned ok=false")
+                    return None
+
+        except Exception:
+            pass
 
         return response
-
 
     except Exception as e:
 
@@ -304,47 +237,81 @@ def send_message(
 
         return None
 
+
 # =========================================================
-# asl llm
+# LLM
 # =========================================================
+
 def ask_llm(user_question, drug_context=""):
+
     if not OPENROUTER_API_KEY:
-        print("ERROR: OPENROUTER_API_KEY is not configured.")
+
+        print(
+            "ERROR: OPENROUTER_API_KEY is not configured."
+        )
+
         return None
 
     system_prompt = """
 تو دستیار هوشمند دارویی «مهرو» هستی.
 
-وظیفه تو پاسخ‌گویی فارسی به پرسش‌های کاربران درباره داروها و اطلاعات دارویی است.
+وظیفه تو پاسخ‌گویی فارسی به پرسش‌های کاربران درباره داروها
+و اطلاعات دارویی است.
 
 قوانین مهم:
 
 1. فقط در حوزه اطلاعات دارویی پاسخ بده.
-2. اگر سؤال کاربر ارتباطی با دارو، مصرف دارو، عوارض، موارد مصرف،
-   تداخلات، هشدارها، منع مصرف، شکل دارویی یا اطلاعات مرتبط با دارو ندارد،
-   پاسخ بده:
-   «این سؤال در حوزه اطلاعات دارویی مهرو نیست.»
 
-3. اطلاعاتی که در CONTEXT ارائه شده را منبع اصلی اطلاعات دارویی در نظر بگیر.
-4. اطلاعاتی را که در CONTEXT وجود ندارد، به عنوان واقعیت قطعی درباره
-   داروی موردنظر اختراع نکن.
-5. پاسخ را به زبان فارسی و برای یک کاربر عادی بنویس.
-6. نام انگلیسی دارو را در صورت مفید بودن داخل پرانتز بیاور.
-7. پاسخ کوتاه، واضح و قابل فهم باشد.
-8. در مسائل پزشکی حساس، از دادن دستور قطعی و شخصی‌سازی‌شده برای
-   تغییر یا قطع دارو خودداری کن و کاربر را به پزشک یا داروساز ارجاع بده.
+2. اگر سؤال کاربر ارتباطی با دارو، مصرف دارو، عوارض،
+موارد مصرف، تداخلات، هشدارها، منع مصرف، شکل دارویی
+یا اطلاعات مرتبط با دارو ندارد، پاسخ بده:
+
+«این سؤال در حوزه اطلاعات دارویی مهرو نیست.»
+
+3. اطلاعاتی که در CONTEXT ارائه شده را منبع اصلی اطلاعات
+دارویی در نظر بگیر.
+
+4. اطلاعاتی را که در CONTEXT وجود ندارد، به عنوان واقعیت
+قطعی درباره داروی موردنظر اختراع نکن.
+
+5. اگر اطلاعات کافی در CONTEXT وجود ندارد، صریحاً بگو
+که اطلاعات کافی در پایگاه داده موجود نیست.
+
+6. پاسخ را به زبان فارسی و برای یک کاربر عادی بنویس.
+
+7. نام انگلیسی دارو را در صورت مفید بودن داخل پرانتز بیاور.
+
+8. پاسخ کوتاه، واضح و قابل فهم باشد.
+
+9. از ارائه تشخیص پزشکی قطعی خودداری کن.
+
+10. در مسائل پزشکی حساس، از دادن دستور قطعی و
+شخصی‌سازی‌شده برای تغییر، قطع یا شروع دارو خودداری کن
+و کاربر را به پزشک یا داروساز ارجاع بده.
+
+11. اگر کاربر درباره دوز مصرفی شخصی، تغییر دوز، قطع دارو،
+یا جایگزین‌کردن دارو سؤال کرد، پاسخ را با احتیاط بده
+و توصیه به مشورت با پزشک یا داروساز کن.
+
+12. اطلاعات موجود در CONTEXT را خلاصه و منظم ارائه کن
+و از تکرار غیرضروری خودداری کن.
 """
 
     user_prompt = f"""
 سؤال کاربر:
+
 {user_question}
 
-اطلاعات بازیابی‌شده از پایگاه داده دارویی:
+--------------------------------
+
+اطلاعات بازیابی‌شده از پایگاه داده دارویی مهرو:
+
 {drug_context if drug_context else "اطلاعات دارویی مشخصی برای این سؤال پیدا نشد."}
 """
 
     payload = {
         "model": OPENROUTER_MODEL,
+
         "messages": [
             {
                 "role": "system",
@@ -355,6 +322,7 @@ def ask_llm(user_question, drug_context=""):
                 "content": user_prompt
             }
         ],
+
         "temperature": 0.2,
         "max_tokens": 500
     }
@@ -367,6 +335,7 @@ def ask_llm(user_question, drug_context=""):
     }
 
     try:
+
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers=headers,
@@ -375,104 +344,124 @@ def ask_llm(user_question, drug_context=""):
         )
 
         if not response.ok:
+
             print(
                 "OpenRouter error:",
                 response.status_code,
                 response.text
             )
+
             return None
 
         data = response.json()
 
-        return (
-            data.get("choices", [{}])[0]
+        answer = (
+            data
+            .get("choices", [{}])[0]
             .get("message", {})
             .get("content")
         )
 
+        if not answer:
+            print("OpenRouter returned empty answer")
+            return None
+
+        return answer.strip()
+
     except Exception as e:
-        print("OpenRouter exception:", repr(e))
+
+        print(
+            "OpenRouter exception:",
+            repr(e)
+        )
+
         return None
+
+
 # =========================================================
-# User
+# USER FUNCTIONS
 # =========================================================
 
 def get_or_create_user(user):
 
-    bale_user_id = user.get("id")
+    bale_user_id = str(
+        user.get("id")
+        or user.get("user_id")
+        or ""
+    )
 
     if not bale_user_id:
-        return None
+        raise ValueError("Bale user ID not found")
 
+    chat_id = str(
+        user.get("chat_id")
+        or bale_user_id
+    )
 
-    first_name = user.get("first_name")
-    username = user.get("username")
-
+    display_name = (
+        user.get("first_name")
+        or user.get("name")
+        or user.get("username")
+        or ""
+    )
 
     with get_db_connection() as conn:
 
         with conn.cursor() as cur:
 
             cur.execute("""
-                INSERT INTO users (
-                    bale_user_id,
-                    first_name,
-                    username
-                )
-
-                VALUES (
-                    %s,
-                    %s,
-                    %s
-                )
-
-                ON CONFLICT (bale_user_id)
-
-                DO UPDATE SET
-
-                    first_name =
-                        EXCLUDED.first_name,
-
-                    username =
-                        EXCLUDED.username
-
-                RETURNING id, display_name;
-            """, (
-                bale_user_id,
-                first_name,
-                username
-            ))
-
+                SELECT id
+                FROM users
+                WHERE bale_user_id = %s
+            """, (bale_user_id,))
 
             row = cur.fetchone()
 
+            if row:
 
-        conn.commit()
+                user_id = row[0]
 
+                cur.execute("""
+                    UPDATE users
+                    SET chat_id = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (
+                    chat_id,
+                    user_id
+                ))
 
-    return {
+            else:
 
-        "id": row[0],
+                cur.execute("""
+                    INSERT INTO users (
+                        bale_user_id,
+                        chat_id,
+                        display_name
+                    )
+                    VALUES (%s, %s, %s)
+                    RETURNING id
+                """, (
+                    bale_user_id,
+                    chat_id,
+                    display_name
+                ))
 
-        "display_name": row[1]
-    }
+                user_id = cur.fetchone()[0]
+
+            conn.commit()
+
+            return user_id
 
 
 # =========================================================
-# Session
+# SESSION
 # =========================================================
 
-def set_session(
-    user_id,
-    state,
-    data=None
-):
+def set_session(user_id, state, data=None):
 
-    data_json = json.dumps(
-        data or {},
-        ensure_ascii=False
-    )
-
+    if data is None:
+        data = {}
 
     with get_db_connection() as conn:
 
@@ -485,34 +474,21 @@ def set_session(
                     data,
                     updated_at
                 )
-
-                VALUES (
-                    %s,
-                    %s,
-                    %s,
-                    CURRENT_TIMESTAMP
-                )
+                VALUES (%s, %s, %s::jsonb, CURRENT_TIMESTAMP)
 
                 ON CONFLICT (user_id)
 
                 DO UPDATE SET
-
-                    state =
-                        EXCLUDED.state,
-
-                    data =
-                        EXCLUDED.data,
-
-                    updated_at =
-                        CURRENT_TIMESTAMP;
+                    state = EXCLUDED.state,
+                    data = EXCLUDED.data,
+                    updated_at = CURRENT_TIMESTAMP
             """, (
                 user_id,
                 state,
-                data_json
+                json.dumps(data)
             ))
 
-
-        conn.commit()
+            conn.commit()
 
 
 def get_session(user_id):
@@ -522,43 +498,20 @@ def get_session(user_id):
         with conn.cursor() as cur:
 
             cur.execute("""
-                SELECT
-                    state,
-                    data
-
+                SELECT state, data
                 FROM user_sessions
-
-                WHERE user_id = %s;
-            """, (
-                user_id,
-            ))
+                WHERE user_id = %s
+            """, (user_id,))
 
             row = cur.fetchone()
 
+            if not row:
+                return None, {}
 
-    if not row:
-        return None
+            state = row[0]
+            data = row[1] or {}
 
-
-    try:
-
-        data = (
-            json.loads(row[1])
-            if row[1]
-            else {}
-        )
-
-    except Exception:
-
-        data = {}
-
-
-    return {
-
-        "state": row[0],
-
-        "data": data
-    }
+            return state, data
 
 
 def clear_session(user_id):
@@ -569,23 +522,13 @@ def clear_session(user_id):
 
             cur.execute("""
                 DELETE FROM user_sessions
+                WHERE user_id = %s
+            """, (user_id,))
 
-                WHERE user_id = %s;
-            """, (
-                user_id,
-            ))
-
-        conn.commit()
+            conn.commit()
 
 
-# =========================================================
-# Display Name
-# =========================================================
-
-def save_display_name(
-    user_id,
-    display_name
-):
+def save_display_name(user_id, display_name):
 
     with get_db_connection() as conn:
 
@@ -593,66 +536,65 @@ def save_display_name(
 
             cur.execute("""
                 UPDATE users
-
-                SET display_name = %s
-
-                WHERE id = %s;
+                SET display_name = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
             """, (
                 display_name,
                 user_id
             ))
 
-        conn.commit()
+            conn.commit()
 
 
 # =========================================================
-# Time
+# TIME
 # =========================================================
 
 def is_valid_time(time_text):
 
-    return bool(
-        re.match(
-            r"^(?:[01]\d|2[0-3]):[0-5]\d$",
-            time_text
-        )
-    )
+    if not time_text:
+        return False
 
-
-def schedule_to_datetime(
-    today,
-    scheduled_time
-):
+    if not re.match(r"^\d{1,2}:\d{2}$", time_text.strip()):
+        return False
 
     try:
 
-        parsed_time = datetime.strptime(
-            scheduled_time,
-            "%H:%M"
-        ).time()
-
-
-        return datetime.combine(
-            today,
-            parsed_time
-        ).replace(
-            tzinfo=IRAN_TZ
+        hour, minute = map(
+            int,
+            time_text.strip().split(":")
         )
 
-
-    except Exception as e:
-
-        print(
-            "Invalid schedule time:",
-            scheduled_time,
-            repr(e)
+        return (
+            0 <= hour <= 23
+            and
+            0 <= minute <= 59
         )
 
-        return None
+    except Exception:
+        return False
+
+
+def schedule_to_datetime(today, scheduled_time):
+
+    hour, minute = map(
+        int,
+        scheduled_time.split(":")
+    )
+
+    return datetime(
+        today.year,
+        today.month,
+        today.day,
+        hour,
+        minute,
+        tzinfo=IRAN_TZ
+    )
 
 
 # =========================================================
-# Drug Database Search
+# DRUG DATABASE
 # =========================================================
 
 def clean_drug_text(text):
@@ -671,758 +613,562 @@ def clean_drug_text(text):
     return text
 
 
+def get_text_values(
+    cur,
+    table_name,
+    generic_rxcui
+):
+
+    try:
+
+        cur.execute(
+            f"""
+            SELECT *
+            FROM {table_name}
+            WHERE generic_rxcui = %s
+            LIMIT 100;
+            """,
+            (generic_rxcui,)
+        )
+
+        rows = cur.fetchall()
+
+        columns = [
+            desc.name
+            for desc in cur.description
+        ]
+
+        values = []
+
+        for row in rows:
+
+            parts = []
+
+            for index, value in enumerate(row):
+
+                column = columns[index]
+
+                if column == "id":
+                    continue
+
+                if value is None:
+                    continue
+
+                if isinstance(
+                    value,
+                    (int, float, bool)
+                ):
+                    continue
+
+                value = str(value).strip()
+
+                if not value:
+                    continue
+
+                parts.append(value)
+
+            if parts:
+
+                values.append(
+                    " | ".join(parts)
+                )
+
+        return values[:20]
+
+    except Exception as e:
+
+        print(
+            f"Drug table read error {table_name}:",
+            repr(e)
+        )
+
+        return []
+
+
 def search_drug_database(drug_name):
 
-    drug_name = clean_drug_text(
-        drug_name
-    )
+    drug_name = clean_drug_text(drug_name)
 
     if not drug_name:
         return None
-
 
     with get_db_connection() as conn:
 
         with conn.cursor() as cur:
 
-            # =================================================
-            # 1. Search generic drug
-            # =================================================
+            # -------------------------------------------------
+            # EXACT MATCH
+            # -------------------------------------------------
 
             cur.execute("""
                 SELECT
                     generic_rxcui,
                     generic_tty,
                     generic_name
-
                 FROM drugs
-
-                WHERE
-                    LOWER(TRIM(generic_name))
-                    =
-                    LOWER(TRIM(%s))
-
+                WHERE LOWER(TRIM(generic_name))
+                      = LOWER(TRIM(%s))
                 LIMIT 1;
-            """, (
-                drug_name,
-            ))
+            """, (drug_name,))
 
-            drug = cur.fetchone()
+            row = cur.fetchone()
 
+            # -------------------------------------------------
+            # PARTIAL MATCH
+            # -------------------------------------------------
 
-            # =================================================
-            # 2. اگر تطابق دقیق نبود، جستجوی جزئی
-            # =================================================
-
-            if not drug:
+            if not row:
 
                 cur.execute("""
                     SELECT
                         generic_rxcui,
                         generic_tty,
                         generic_name
-
                     FROM drugs
-
-                    WHERE
-                        generic_name ILIKE %s
-
-                    ORDER BY
-                        LENGTH(generic_name)
-
+                    WHERE generic_name ILIKE %s
+                    ORDER BY LENGTH(generic_name)
                     LIMIT 1;
                 """, (
-                    f"%{drug_name}%",
+                    f"%{drug_name}%"
                 ))
 
-                drug = cur.fetchone()
+                row = cur.fetchone()
 
-
-            if not drug:
-
+            if not row:
                 return None
 
+            generic_rxcui = row[0]
+            generic_tty = row[1]
+            generic_name = row[2]
 
-            generic_rxcui = drug[0]
-            generic_tty = drug[1]
-            generic_name = drug[2]
-
-
-            result = {
-
-                "generic_rxcui":
-                    generic_rxcui,
-
-                "generic_tty":
-                    generic_tty,
-
-                "generic_name":
-                    generic_name,
-
-                "products": [],
-
-                "indications": [],
-
-                "side_effects": [],
-
-                "contraindications": [],
-
-                "warnings": [],
-
-                "precautions": [],
-
-                "interactions": []
-            }
-
-
-            # =================================================
-            # Products
-            # =================================================
+            # -------------------------------------------------
+            # PRODUCTS
+            # -------------------------------------------------
 
             cur.execute("""
                 SELECT
                     product_rxcui,
                     product_name
-
                 FROM drug_products
-
                 WHERE generic_rxcui = %s
-
                 ORDER BY product_name
-
                 LIMIT 10;
-            """, (
-                generic_rxcui,
-            ))
+            """, (generic_rxcui,))
 
             products = cur.fetchall()
 
+            product_list = []
 
-            for row in products:
+            for product in products:
 
-                result["products"].append({
-                    "rxcui": row[0],
-                    "name": row[1]
+                product_list.append({
+                    "product_rxcui": product[0],
+                    "product_name": product[1]
                 })
 
+            # -------------------------------------------------
+            # CHILD TABLES
+            # -------------------------------------------------
 
-            # =================================================
-            # Helper برای خواندن اطلاعات متنی
-            # =================================================
-
-            def get_text_values(
-                table_name,
-                generic_column="generic_rxcui"
-            ):
-
-                try:
-
-                    cur.execute(
-                        f"""
-                        SELECT *
-                        FROM {table_name}
-                        WHERE {generic_column} = %s
-                        LIMIT 100;
-                        """,
-                        (
-                            generic_rxcui,
-                        )
-                    )
-
-                    rows = cur.fetchall()
-
-                    columns = [
-                        desc.name
-                        for desc in cur.description
-                    ]
-
-                    values = []
-
-                    for row in rows:
-
-                        parts = []
-
-                        for index, value in enumerate(row):
-
-                            column = columns[index]
-
-                            if column == "id":
-                                continue
-
-                            if value is None:
-                                continue
-
-                            if isinstance(
-                                value,
-                                (int, float, bool)
-                            ):
-                                continue
-
-                            value = str(value).strip()
-
-                            if not value:
-                                continue
-
-                            parts.append(value)
-
-
-                        if parts:
-
-                            values.append(
-                                " | ".join(parts)
-                            )
-
-
-                    return values[:20]
-
-                except Exception as e:
-
-                    print(
-                        f"Drug table read error "
-                        f"{table_name}:",
-                        repr(e)
-                    )
-
-                    return []
-
-
-            # =================================================
-            # Indications
-            # =================================================
-
-            result["indications"] = get_text_values(
-                "drug_indications"
+            indications = get_text_values(
+                cur,
+                "drug_indications",
+                generic_rxcui
             )
 
-
-            # =================================================
-            # Side Effects
-            # =================================================
-
-            result["side_effects"] = get_text_values(
-                "drug_side_effects"
+            side_effects = get_text_values(
+                cur,
+                "drug_side_effects",
+                generic_rxcui
             )
 
-
-            # =================================================
-            # Contraindications
-            # =================================================
-
-            result["contraindications"] = get_text_values(
-                "drug_contraindications"
+            contraindications = get_text_values(
+                cur,
+                "drug_contraindications",
+                generic_rxcui
             )
 
-
-            # =================================================
-            # Warnings
-            # =================================================
-
-            result["warnings"] = get_text_values(
-                "drug_warnings"
+            warnings = get_text_values(
+                cur,
+                "drug_warnings",
+                generic_rxcui
             )
 
-
-            # =================================================
-            # Precautions
-            # =================================================
-
-            result["precautions"] = get_text_values(
-                "drug_precautions"
+            precautions = get_text_values(
+                cur,
+                "drug_precautions",
+                generic_rxcui
             )
 
-
-            # =================================================
-            # Interactions
-            # =================================================
-
-            result["interactions"] = get_text_values(
-                "drug_interactions"
+            interactions = get_text_values(
+                cur,
+                "drug_interactions",
+                generic_rxcui
             )
 
+            return {
+                "generic_rxcui": generic_rxcui,
+                "generic_tty": generic_tty,
+                "generic_name": generic_name,
+                "products": product_list,
+                "indications": indications,
+                "side_effects": side_effects,
+                "contraindications": contraindications,
+                "warnings": warnings,
+                "precautions": precautions,
+                "interactions": interactions
+            }
 
-            return result
 
+# =========================================================
+# BUILD DRUG CONTEXT FOR LLM
+# =========================================================
+
+def drug_to_context(drug):
+
+    if not drug:
+        return ""
+
+    context = []
+
+    context.append(
+        f"نام ژنریک: {drug.get('generic_name', '')}"
+    )
+
+    context.append(
+        f"RxCUI: {drug.get('generic_rxcui', '')}"
+    )
+
+    context.append(
+        f"نوع: {drug.get('generic_tty', '')}"
+    )
+
+    products = drug.get("products", [])
+
+    if products:
+
+        product_text = []
+
+        for item in products:
+
+            name = item.get("product_name")
+
+            if name:
+                product_text.append(
+                    str(name)
+                )
+
+        if product_text:
+
+            context.append(
+                "فرآورده‌ها: "
+                + "؛ ".join(product_text)
+            )
+
+    sections = [
+        ("موارد مصرف", "indications"),
+        ("عوارض جانبی", "side_effects"),
+        ("موارد منع مصرف", "contraindications"),
+        ("هشدارها", "warnings"),
+        ("احتیاط‌ها", "precautions"),
+        ("تداخلات", "interactions")
+    ]
+
+    for title, key in sections:
+
+        values = drug.get(key, [])
+
+        if not values:
+            continue
+
+        context.append(
+            f"{title}:\n"
+            + "\n".join(
+                f"- {value}"
+                for value in values[:10]
+            )
+        )
+
+    return "\n\n".join(context)
+
+
+# =========================================================
+# TRY TO FIND DRUGS MENTIONED IN USER QUESTION
+# =========================================================
+
+def find_drugs_in_question(question):
+
+    question = clean_drug_text(question)
+
+    if not question:
+        return []
+
+    found_drugs = []
+
+    with get_db_connection() as conn:
+
+        with conn.cursor() as cur:
+
+            # First look for exact generic names.
+            cur.execute("""
+                SELECT
+                    generic_rxcui,
+                    generic_tty,
+                    generic_name
+                FROM drugs
+                WHERE LOWER(%s)
+                      LIKE '%' || LOWER(generic_name) || '%'
+                ORDER BY LENGTH(generic_name) DESC
+                LIMIT 3;
+            """, (question,))
+
+            rows = cur.fetchall()
+
+            for row in rows:
+
+                drug = search_drug_database(
+                    row[2]
+                )
+
+                if drug:
+
+                    found_drugs.append(drug)
+
+    return found_drugs
+
+
+# =========================================================
+# FORMAT DRUG RESULT
+# =========================================================
 
 def format_drug_result(drug):
 
     if not drug:
-        return None
+        return "❌ اطلاعاتی برای این دارو پیدا نشد."
 
+    lines = []
 
-    text = (
-        "💊 اطلاعات دارو\n\n"
-        f"نام دارو: {drug['generic_name']}\n"
+    lines.append("💊 اطلاعات دارو")
+    lines.append("")
+    lines.append(
+        f"نام دارو: {drug.get('generic_name', '-')}"
     )
 
-
-    if drug.get("generic_tty"):
-
-        text += (
-            f"نوع: {drug['generic_tty']}\n"
-        )
-
-
-    if drug.get("generic_rxcui"):
-
-        text += (
-            f"RxCUI: {drug['generic_rxcui']}\n"
-        )
-
-
-    # =====================================================
-    # Products
-    # =====================================================
-
-    products = drug.get(
-        "products",
-        []
+    lines.append(
+        f"نوع: {drug.get('generic_tty', '-')}"
     )
+
+    lines.append(
+        f"RxCUI: {drug.get('generic_rxcui', '-')}"
+    )
+
+    # -----------------------------------------------------
+    # PRODUCTS
+    # -----------------------------------------------------
+
+    products = drug.get("products", [])
 
     if products:
 
-        text += "\n📦 فرآورده‌ها:\n"
+        lines.append("")
+        lines.append("📦 فرآورده‌ها:")
 
-        for product in products[:5]:
+        for product in products[:10]:
 
-            name = product.get(
-                "name"
-            )
+            name = product.get("product_name")
 
             if name:
-
-                text += (
-                    f"• {name}\n"
+                lines.append(
+                    f"• {name}"
                 )
 
+    # -----------------------------------------------------
+    # GENERAL SECTIONS
+    # -----------------------------------------------------
 
-    # =====================================================
-    # Indications
-    # =====================================================
+    sections = [
+        ("🩺 موارد مصرف", "indications"),
+        ("⚠️ عوارض جانبی", "side_effects"),
+        ("🚫 موارد منع مصرف", "contraindications"),
+        ("⚠️ هشدارها", "warnings"),
+        ("ℹ️ احتیاط‌ها", "precautions"),
+        ("🔄 تداخلات", "interactions")
+    ]
 
-    indications = drug.get(
-        "indications",
-        []
-    )
+    for title, key in sections:
 
-    if indications:
+        values = drug.get(key, [])
 
-        text += "\n🩺 موارد مصرف:\n"
+        if not values:
+            continue
 
-        for item in indications[:5]:
+        lines.append("")
+        lines.append(title)
 
-            text += (
-                f"• {item}\n"
+        for value in values[:8]:
+
+            lines.append(
+                f"• {value}"
             )
 
-
-    # =====================================================
-    # Side Effects
-    # =====================================================
-
-    side_effects = drug.get(
-        "side_effects",
-        []
+    lines.append("")
+    lines.append(
+        "ℹ️ این اطلاعات از پایگاه داده دارویی مهرو استخراج شده است."
     )
 
-    if side_effects:
-
-        text += "\n⚠️ عوارض جانبی:\n"
-
-        for item in side_effects[:5]:
-
-            text += (
-                f"• {item}\n"
-            )
+    return "\n".join(lines)
 
 
-    # =====================================================
-    # Contraindications
-    # =====================================================
+# =========================================================
+# MAIN MENU
+# =========================================================
 
-    contraindications = drug.get(
-        "contraindications",
-        []
+MAIN_MENU_BUTTONS = [
+    ["📊 داشبورد من"],
+    ["➕ افزودن دارو"],
+    ["💊 داروهای من"],
+    ["🔎 جستجوی دارو"],
+    ["💬 سؤال دارویی"],
+    ["❌ لغو"]
+]
+
+
+def main_menu(chat_id, user_id):
+
+    send_message(
+        chat_id,
+        "🌷 به مهرو خوش آمدید.\n\n"
+        "از منوی زیر انتخاب کنید:",
+        MAIN_MENU_BUTTONS
     )
-
-    if contraindications:
-
-        text += "\n🚫 موارد منع مصرف:\n"
-
-        for item in contraindications[:5]:
-
-            text += (
-                f"• {item}\n"
-            )
-
-
-    # =====================================================
-    # Warnings
-    # =====================================================
-
-    warnings = drug.get(
-        "warnings",
-        []
-    )
-
-    if warnings:
-
-        text += "\n⚠️ هشدارها:\n"
-
-        for item in warnings[:5]:
-
-            text += (
-                f"• {item}\n"
-            )
-
-
-    # =====================================================
-    # Precautions
-    # =====================================================
-
-    precautions = drug.get(
-        "precautions",
-        []
-    )
-
-    if precautions:
-
-        text += "\n🔸 احتیاط‌ها:\n"
-
-        for item in precautions[:5]:
-
-            text += (
-                f"• {item}\n"
-            )
-
-
-    # =====================================================
-    # Interactions
-    # =====================================================
-
-    interactions = drug.get(
-        "interactions",
-        []
-    )
-
-    if interactions:
-
-        text += "\n🔄 تداخلات:\n"
-
-        for item in interactions[:5]:
-
-            text += (
-                f"• {item}\n"
-            )
-
-
-    text += (
-        "\n\nℹ️ این اطلاعات از پایگاه داده "
-        "دارویی مهرور استخراج شده است."
-    )
-
-
-    return text
-
-
-def start_drug_search(
-    chat_id,
-    user_id
-):
 
     set_session(
         user_id,
-        "ASK_DRUG_SEARCH",
-        {}
-    )
-
-
-    send_message(
-
-        chat_id,
-
-        "🔎 جستجوی دارو\n\n"
-
-        "نام دارو را وارد کن.\n\n"
-
-        "مثلاً:\n"
-        "acetaminophen\n"
-        "paracetamol\n"
-        "ibuprofen"
+        "MAIN_MENU"
     )
 
 
 # =========================================================
-# Main Menu
+# START
 # =========================================================
 
-def main_menu(
-    chat_id,
-    name
-):
-
-    send_message(
-
-        chat_id,
-
-        f"سلام {name} جان 🌱\n\n"
-
-        "من «مهرور» هستم؛ "
-        "سامانه یادآوری داروهای شما 💚\n\n"
-
-        "از منوی زیر می‌تونی داروهات رو مدیریت کنی.",
-
-        buttons=[
-
-            ["📊 داشبورد من"],
-
-            ["➕ افزودن دارو"],
-
-            ["💊 داروهای من"],
-
-            ["🔎 جستجوی دارو"],
-
-            ["❌ لغو"]
-        ]
-    )
-
-
-# =========================================================
-# Start
-# =========================================================
-
-def start_conversation(
-    chat_id,
-    db_user
-):
-
-    display_name = db_user.get(
-        "display_name"
-    )
-
-
-    if display_name:
-
-        main_menu(
-            chat_id,
-            display_name
-        )
-
-
-        set_session(
-            db_user["id"],
-            "MAIN_MENU",
-            {}
-        )
-
-
-    else:
-
-        send_message(
-
-            chat_id,
-
-            "سلام 🌱\n\n"
-
-            "من «مهرور» هستم؛ "
-            "سامانه یادآوری داروهای شما 💚\n\n"
-
-            "خوشحال می‌شم بدونم "
-            "با چه اسمی صداتون بزنم؟"
-        )
-
-
-        set_session(
-
-            db_user["id"],
-
-            "ASK_NAME",
-
-            {}
-        )
-
-
-# =========================================================
-# Dashboard
-# =========================================================
-
-def show_dashboard(
-    chat_id,
-    user_id
-):
-
-    now = datetime.now(
-        IRAN_TZ
-    )
-
-    today = now.date()
-
+def start_conversation(chat_id, user_id):
 
     with get_db_connection() as conn:
 
         with conn.cursor() as cur:
 
             cur.execute("""
-                SELECT COUNT(*)
-
-                FROM medications
-
-                WHERE user_id = %s
-
-                AND is_active = TRUE;
-            """, (
-                user_id,
-            ))
-
-            active_count = cur.fetchone()[0]
-
-
-            cur.execute("""
-                SELECT
-
-                    COUNT(*) FILTER (
-                        WHERE ro.status = 'taken'
-                    ),
-
-                    COUNT(*) FILTER (
-                        WHERE ro.status = 'not_taken'
-                    ),
-
-                    COUNT(*) FILTER (
-                        WHERE ro.status IN (
-                            'pending',
-                            'sent',
-                            'snoozed'
-                        )
-                    )
-
-                FROM reminder_occurrences ro
-
-                JOIN medication_schedules ms
-                    ON ms.id =
-                       ro.medication_schedule_id
-
-                JOIN medications m
-                    ON m.id =
-                       ms.medication_id
-
-                WHERE m.user_id = %s
-
-                AND m.is_active = TRUE
-
-                AND ro.reminder_date = %s;
-            """, (
-                user_id,
-                today
-            ))
+                SELECT display_name
+                FROM users
+                WHERE id = %s
+            """, (user_id,))
 
             row = cur.fetchone()
 
-            taken_count = row[0] or 0
-            not_taken_count = row[1] or 0
-            pending_count = row[2] or 0
+    if row and row[0]:
 
-
-            cur.execute("""
-                SELECT
-                    m.name,
-                    ms.time
-
-                FROM medication_schedules ms
-
-                JOIN medications m
-                    ON m.id =
-                       ms.medication_id
-
-                WHERE m.user_id = %s
-
-                AND m.is_active = TRUE
-
-                ORDER BY ms.time;
-            """, (
-                user_id,
-            ))
-
-            schedules = cur.fetchall()
-
-
-    next_dose = None
-
-
-    for name, time_text in schedules:
-
-        dt = schedule_to_datetime(
-            today,
-            time_text
-        )
-
-        if dt and dt >= now:
-
-            next_dose = (
-                name,
-                time_text
-            )
-
-            break
-
-
-    text = (
-        "📊 داشبورد مهرور\n\n"
-
-        f"💊 داروهای فعال: "
-        f"{active_count}\n\n"
-
-        "📅 وضعیت امروز:\n"
-
-        f"✅ مصرف شده: {taken_count}\n"
-
-        f"⏳ در انتظار: {pending_count}\n"
-
-        f"❌ مصرف نشده: {not_taken_count}\n\n"
-    )
-
-
-    if next_dose:
-
-        text += (
-            "⏰ نوبت بعدی:\n"
-            f"💊 {next_dose[0]}\n"
-            f"🕐 {next_dose[1]}\n"
+        main_menu(
+            chat_id,
+            user_id
         )
 
     else:
 
-        text += (
-            "⏰ امروز نوبت دیگری باقی نمانده است. 🌱"
+        send_message(
+            chat_id,
+            "سلام 🌷\n"
+            "به مهرو خوش آمدید.\n\n"
+            "لطفاً نام خود را وارد کنید:"
+        )
+
+        set_session(
+            user_id,
+            "ASK_NAME"
         )
 
 
+# =========================================================
+# CANCEL
+# =========================================================
+
+def cancel_conversation(chat_id, user_id):
+
+    clear_session(user_id)
+
     send_message(
-
         chat_id,
+        "عملیات لغو شد."
+    )
 
-        text,
+    main_menu(
+        chat_id,
+        user_id
+    )
 
-        buttons=[
 
-            ["💊 داروهای من"],
+# =========================================================
+# DRUG SEARCH
+# =========================================================
 
-            ["➕ افزودن دارو"],
+def start_drug_search(chat_id, user_id):
 
-            ["🔎 جستجوی دارو"],
+    set_session(
+        user_id,
+        "ASK_DRUG_SEARCH"
+    )
 
-            ["↩️ منوی اصلی"]
+    send_message(
+        chat_id,
+        "🔎 نام دارو را وارد کنید.\n\n"
+        "مثلاً:\n"
+        "• paracetamol\n"
+        "• ibuprofen\n"
+        "• acetaminophen\n\n"
+        "برای بازگشت به منوی اصلی، "
+        "«↩️ منوی اصلی» را بزنید.",
+        [
+            ["↩️ منوی اصلی"],
+            ["❌ لغو"]
         ]
     )
 
 
 # =========================================================
-# Save Medication
+# DRUG QUESTION
+# =========================================================
+
+def start_drug_question(chat_id, user_id):
+
+    set_session(
+        user_id,
+        "ASK_DRUG_QUESTION"
+    )
+
+    send_message(
+        chat_id,
+        "💬 سؤال دارویی خود را بنویسید.\n\n"
+        "مثلاً:\n"
+        "• پاراستامول برای چی خوبه؟\n"
+        "• عوارض ایبوپروفن چیه؟\n"
+        "• تداخلات این دارو چیست؟\n\n"
+        "سؤال شما به دستیار هوشمند مهرو ارسال می‌شود.",
+        [
+            ["↩️ منوی اصلی"],
+            ["❌ لغو"]
+        ]
+    )
+
+
+# =========================================================
+# MEDICATION FUNCTIONS
 # =========================================================
 
 def save_medication(
     user_id,
-    medication_name,
-    times_per_day,
+    name,
+    doses_per_day,
+    number_of_doses,
     times
 ):
 
@@ -1434,168 +1180,41 @@ def save_medication(
                 INSERT INTO medications (
                     user_id,
                     name,
-                    times_per_day,
-                    is_active
+                    doses_per_day,
+                    number_of_doses,
+                    active
                 )
-
-                VALUES (
-                    %s,
-                    %s,
-                    %s,
-                    TRUE
-                )
-
-                RETURNING id;
+                VALUES (%s, %s, %s, %s, TRUE)
+                RETURNING id
             """, (
                 user_id,
-                medication_name,
-                times_per_day
+                name,
+                doses_per_day,
+                number_of_doses
             ))
-
 
             medication_id = cur.fetchone()[0]
 
-
-            for index, time in enumerate(
-                times,
-                start=1
-            ):
+            for scheduled_time in times:
 
                 cur.execute("""
                     INSERT INTO medication_schedules (
                         medication_id,
-                        dose_number,
-                        time
+                        scheduled_time,
+                        active
                     )
-
-                    VALUES (
-                        %s,
-                        %s,
-                        %s
-                    );
+                    VALUES (%s, %s, TRUE)
                 """, (
                     medication_id,
-                    index,
-                    time
+                    scheduled_time
                 ))
 
+            conn.commit()
 
-        conn.commit()
-
-
-    return medication_id
+            return medication_id
 
 
-# =========================================================
-# Add Medication
-# =========================================================
-
-def start_add_medication(
-    chat_id,
-    user_id
-):
-
-    set_session(
-
-        user_id,
-
-        "ASK_MEDICATION_NAME",
-
-        {}
-    )
-
-
-    send_message(
-
-        chat_id,
-
-        "💊 خیلی خوب.\n\n"
-
-        "اسم دارویی که می‌خوای "
-        "ثبت کنی رو بنویس:"
-    )
-
-
-# =========================================================
-# Confirmation
-# =========================================================
-
-def show_confirmation(
-    chat_id,
-    user_id,
-    data
-):
-
-    name = data["medication_name"]
-
-    times_per_day = data["times_per_day"]
-
-    times = data["times"]
-
-
-    text = (
-
-        "📋 اطلاعات دارو:\n\n"
-
-        f"💊 نام دارو: {name}\n"
-
-        f"🔢 تعداد مصرف در روز: "
-        f"{times_per_day} بار\n\n"
-
-        "⏰ ساعت‌های مصرف:\n"
-    )
-
-
-    for index, time in enumerate(
-        times,
-        start=1
-    ):
-
-        text += (
-            f"{index}. {time}\n"
-        )
-
-
-    text += (
-        "\nآیا اطلاعات بالا درست است؟"
-    )
-
-
-    set_session(
-
-        user_id,
-
-        "CONFIRM_MEDICATION",
-
-        data
-    )
-
-
-    send_message(
-
-        chat_id,
-
-        text,
-
-        buttons=[
-
-            ["✅ ثبت دارو"],
-
-            ["🔄 اصلاح اطلاعات"],
-
-            ["❌ لغو"]
-        ]
-    )
-
-
-# =========================================================
-# Medication List
-# =========================================================
-
-def show_medications(
-    chat_id,
-    user_id
-):
+def get_user_medications(user_id):
 
     with get_db_connection() as conn:
 
@@ -1605,176 +1224,26 @@ def show_medications(
                 SELECT
                     id,
                     name,
-                    times_per_day,
-                    is_active,
-                    ended_at
-
+                    doses_per_day,
+                    number_of_doses,
+                    active
                 FROM medications
-
                 WHERE user_id = %s
+                ORDER BY id DESC
+            """, (user_id,))
 
-                ORDER BY
-                    is_active DESC,
-                    id;
-            """, (
-                user_id,
-            ))
-
-            medications = cur.fetchall()
+            return cur.fetchall()
 
 
-            if not medications:
-
-                send_message(
-
-                    chat_id,
-
-                    "هنوز هیچ دارویی ثبت نکردی 💊",
-
-                    buttons=[
-
-                        ["➕ افزودن دارو"],
-
-                        ["🔎 جستجوی دارو"],
-
-                        ["↩️ منوی اصلی"]
-                    ]
-                )
-
-                return
-
-
-            text = "💊 داروهای شما:\n\n"
-
-            buttons = []
-
-
-            for index, medication in enumerate(
-                medications,
-                start=1
-            ):
-
-                medication_id = medication[0]
-                name = medication[1]
-                times_per_day = medication[2]
-                is_active = medication[3]
-                ended_at = medication[4]
-
-
-                status = (
-                    "🟢 فعال"
-                    if is_active
-                    else "🔴 پایان‌یافته"
-                )
-
-
-                text += (
-                    f"{index}. 💊 {name}\n"
-                    f"   {status}\n"
-                    f"   🔢 {times_per_day} بار در روز\n"
-                )
-
-
-                cur.execute("""
-                    SELECT time
-
-                    FROM medication_schedules
-
-                    WHERE medication_id = %s
-
-                    ORDER BY dose_number;
-                """, (
-                    medication_id,
-                ))
-
-
-                schedules = cur.fetchall()
-
-
-                for schedule in schedules:
-
-                    text += (
-                        f"   ⏰ {schedule[0]}\n"
-                    )
-
-
-                if not is_active and ended_at:
-
-                    try:
-
-                        ended_text = ended_at.strftime(
-                            "%Y-%m-%d %H:%M"
-                        )
-
-                        text += (
-                            f"   🛑 پایان: {ended_text}\n"
-                        )
-
-                    except Exception:
-                        pass
-
-
-                text += "\n"
-
-
-                buttons.append([
-                    f"💊 {name}"
-                ])
-
-
-    text += (
-        "برای مدیریت هر دارو، "
-        "روی نام آن بزن."
-    )
-
-
-    buttons.extend([
-
-        ["➕ افزودن دارو"],
-
-        ["🔎 جستجوی دارو"],
-
-        ["↩️ منوی اصلی"]
-    ])
-
-
-    send_message(
-
-        chat_id,
-
-        text,
-
-        buttons=buttons
-    )
-
-
-# =========================================================
-# Get User Medication By Button Text
-# =========================================================
-
-def get_medication_by_button(
-    user_id,
-    text
-):
-
-    if not text:
-        return None
-
+def get_medication_by_button(user_id, text):
 
     if not text.startswith("💊"):
         return None
 
-
-    name = text.replace(
-        "💊",
-        "",
-        1
-    ).strip()
-
+    name = text[2:].strip()
 
     if not name:
         return None
-
 
     with get_db_connection() as conn:
 
@@ -1784,34 +1253,79 @@ def get_medication_by_button(
                 SELECT
                     id,
                     name,
-                    times_per_day,
-                    is_active
-
+                    doses_per_day,
+                    number_of_doses,
+                    active
                 FROM medications
-
                 WHERE user_id = %s
-
-                AND TRIM(name) = TRIM(%s)
-
-                ORDER BY
-                    is_active DESC,
-                    id DESC
-
-                LIMIT 1;
+                  AND name = %s
+                LIMIT 1
             """, (
                 user_id,
                 name
             ))
 
-            row = cur.fetchone()
+            return cur.fetchone()
 
 
-    return row
+def show_medications(chat_id, user_id):
 
+    medications = get_user_medications(
+        user_id
+    )
 
-# =========================================================
-# Medication Management
-# =========================================================
+    if not medications:
+
+        send_message(
+            chat_id,
+            "💊 هنوز دارویی ثبت نکرده‌اید.",
+            [
+                ["➕ افزودن دارو"],
+                ["🔎 جستجوی دارو"],
+                ["💬 سؤال دارویی"],
+                ["↩️ منوی اصلی"]
+            ]
+        )
+
+        set_session(
+            user_id,
+            "MAIN_MENU"
+        )
+
+        return
+
+    buttons = []
+
+    for medication in medications:
+
+        medication_id = medication[0]
+        name = medication[1]
+        active = medication[4]
+
+        if active:
+
+            buttons.append([
+                f"💊 {name}"
+            ])
+
+    buttons.extend([
+        ["➕ افزودن دارو"],
+        ["🔎 جستجوی دارو"],
+        ["💬 سؤال دارویی"],
+        ["↩️ منوی اصلی"]
+    ])
+
+    send_message(
+        chat_id,
+        "💊 داروهای شما:",
+        buttons
+    )
+
+    set_session(
+        user_id,
+        "MEDICATION_LIST"
+    )
+
 
 def show_medication_management(
     chat_id,
@@ -1827,15 +1341,12 @@ def show_medication_management(
                 SELECT
                     id,
                     name,
-                    times_per_day,
-                    is_active,
-                    ended_at
-
+                    doses_per_day,
+                    number_of_doses,
+                    active
                 FROM medications
-
                 WHERE id = %s
-
-                AND user_id = %s;
+                  AND user_id = %s
             """, (
                 medication_id,
                 user_id
@@ -1843,479 +1354,84 @@ def show_medication_management(
 
             medication = cur.fetchone()
 
-
             if not medication:
 
                 send_message(
                     chat_id,
-                    "❌ این دارو پیدا نشد."
+                    "دارو پیدا نشد."
                 )
 
                 return
 
-
             cur.execute("""
-                SELECT
-                    id,
-                    dose_number,
-                    time
-
+                SELECT scheduled_time
                 FROM medication_schedules
-
                 WHERE medication_id = %s
-
-                ORDER BY dose_number;
-            """, (
-                medication_id,
-            ))
+                  AND active = TRUE
+                ORDER BY scheduled_time
+            """, (medication_id,))
 
             schedules = cur.fetchall()
 
-
     name = medication[1]
-    is_active = medication[3]
-    ended_at = medication[4]
 
-
-    status = (
-        "🟢 فعال"
-        if is_active
-        else "🔴 پایان‌یافته"
-    )
-
+    times = [
+        row[0]
+        for row in schedules
+    ]
 
     text = (
-        f"💊 مدیریت داروی «{name}»\n\n"
-
-        f"وضعیت: {status}\n\n"
-
-        "⏰ ساعت‌های مصرف:\n"
+        f"💊 {name}\n\n"
+        f"تعداد دفعات مصرف: "
+        f"{medication[2] or '-'}\n"
+        f"تعداد کل دوز: "
+        f"{medication[3] or '-'}\n\n"
+        "⏰ زمان‌های مصرف:\n"
     )
 
+    if times:
 
-    for schedule in schedules:
-
-        text += (
-            f"{schedule[1]}. {schedule[2]}\n"
-        )
-
-
-    if not schedules:
-
-        text += "هیچ ساعت مصرفی ثبت نشده است.\n"
-
-
-    if not is_active and ended_at:
-
-        try:
-
-            ended_text = ended_at.strftime(
-                "%Y-%m-%d %H:%M"
-            )
-
-            text += (
-                f"\n🛑 پایان مصرف: {ended_text}\n"
-            )
-
-        except Exception:
-            pass
-
-
-    buttons = []
-
-
-    if is_active:
-
-        buttons.append(
-            ["✏️ تغییر ساعت مصرف"]
-        )
-
-        buttons.append(
-            ["🛑 پایان مصرف دارو"]
+        text += "\n".join(
+            f"• {time}"
+            for time in times
         )
 
     else:
 
-        buttons.append(
-            ["🟢 فعال کردن دوباره"]
-        )
+        text += "ثبت نشده"
 
+    buttons = [
+        ["✏️ تغییر زمان مصرف"],
+        ["🗑 حذف دارو"],
+        ["↩️ داروهای من"],
+        ["↩️ منوی اصلی"]
+    ]
 
-    buttons.append(
-        ["🗑 حذف دارو"]
+    send_message(
+        chat_id,
+        text,
+        buttons
     )
-
-    buttons.append(
-        ["↩️ داروهای من"]
-    )
-
 
     set_session(
-
         user_id,
-
         "MEDICATION_MANAGEMENT",
-
         {
             "medication_id": medication_id
         }
     )
 
 
-    send_message(
-
-        chat_id,
-
-        text,
-
-        buttons=buttons
-    )
-
-
 # =========================================================
-# End Medication
-# =========================================================
-
-def end_medication(
-    user_id,
-    medication_id
-):
-
-    now = datetime.now(
-        IRAN_TZ
-    )
-
-
-    with get_db_connection() as conn:
-
-        with conn.cursor() as cur:
-
-            cur.execute("""
-                UPDATE medications
-
-                SET
-                    is_active = FALSE,
-                    ended_at = %s
-
-                WHERE id = %s
-
-                AND user_id = %s
-
-                AND is_active = TRUE;
-            """, (
-                now,
-                medication_id,
-                user_id
-            ))
-
-
-            cur.execute("""
-                UPDATE reminder_occurrences ro
-
-                SET
-                    status = 'cancelled',
-                    snooze_until = NULL
-
-                FROM medication_schedules ms
-
-                WHERE ro.medication_schedule_id = ms.id
-
-                AND ms.medication_id = %s
-
-                AND ro.status IN (
-                    'pending',
-                    'sent',
-                    'snoozed'
-                )
-
-                AND ro.reminder_date >= %s;
-            """, (
-                medication_id,
-                now.date()
-            ))
-
-
-        conn.commit()
-
-
-# =========================================================
-# Reactivate Medication
-# =========================================================
-
-def reactivate_medication(
-    user_id,
-    medication_id
-):
-
-    with get_db_connection() as conn:
-
-        with conn.cursor() as cur:
-
-            cur.execute("""
-                UPDATE medications
-
-                SET
-                    is_active = TRUE,
-                    ended_at = NULL
-
-                WHERE id = %s
-
-                AND user_id = %s;
-            """, (
-                medication_id,
-                user_id
-            ))
-
-        conn.commit()
-
-
-# =========================================================
-# Delete Medication
-# =========================================================
-
-def delete_medication(
-    user_id,
-    medication_id
-):
-
-    with get_db_connection() as conn:
-
-        with conn.cursor() as cur:
-
-            cur.execute("""
-                DELETE FROM medications
-
-                WHERE id = %s
-
-                AND user_id = %s;
-            """, (
-                medication_id,
-                user_id
-            ))
-
-        conn.commit()
-
-
-# =========================================================
-# Change Medication Times
-# =========================================================
-
-def start_change_times(
-    chat_id,
-    user_id,
-    medication_id
-):
-
-    with get_db_connection() as conn:
-
-        with conn.cursor() as cur:
-
-            cur.execute("""
-                SELECT
-                    name,
-                    times_per_day,
-                    is_active
-
-                FROM medications
-
-                WHERE id = %s
-
-                AND user_id = %s;
-            """, (
-                medication_id,
-                user_id
-            ))
-
-            row = cur.fetchone()
-
-
-    if not row:
-
-        send_message(
-            chat_id,
-            "❌ دارو پیدا نشد."
-        )
-
-        return
-
-
-    name = row[0]
-    times_per_day = row[1]
-    is_active = row[2]
-
-
-    if not is_active:
-
-        send_message(
-            chat_id,
-
-            "❌ داروی پایان‌یافته را نمی‌توان "
-            "ویرایش کرد.\n\n"
-            "ابتدا دارو را دوباره فعال کن."
-        )
-
-        return
-
-
-    set_session(
-
-        user_id,
-
-        "EDIT_TIMES",
-
-        {
-            "medication_id": medication_id,
-            "medication_name": name,
-            "times_per_day": times_per_day,
-            "times": []
-        }
-    )
-
-
-    send_message(
-
-        chat_id,
-
-        f"✏️ تغییر ساعت مصرف «{name}»\n\n"
-
-        f"تعداد نوبت‌ها: {times_per_day}\n\n"
-
-        "⏰ ساعت نوبت اول را وارد کن.\n\n"
-
-        "مثلاً:\n"
-        "08:00"
-    )
-
-
-# =========================================================
-# Save Changed Times
-# =========================================================
-
-def save_changed_times(
-    user_id,
-    medication_id,
-    times
-):
-
-    with get_db_connection() as conn:
-
-        with conn.cursor() as cur:
-
-            cur.execute("""
-                SELECT id
-
-                FROM medication_schedules
-
-                WHERE medication_id = %s;
-            """, (
-                medication_id,
-            ))
-
-            old_schedule_ids = [
-                row[0]
-                for row in cur.fetchall()
-            ]
-
-
-            if old_schedule_ids:
-
-                cur.execute("""
-                    UPDATE reminder_occurrences
-
-                    SET
-                        status = 'cancelled',
-                        snooze_until = NULL
-
-                    WHERE medication_schedule_id = ANY(%s)
-
-                    AND status IN (
-                        'pending',
-                        'sent',
-                        'snoozed'
-                    );
-                """, (
-                    old_schedule_ids,
-                ))
-
-
-            cur.execute("""
-                DELETE FROM medication_schedules
-
-                WHERE medication_id = %s;
-            """, (
-                medication_id,
-            ))
-
-
-            for index, time in enumerate(
-                times,
-                start=1
-            ):
-
-                cur.execute("""
-                    INSERT INTO medication_schedules (
-                        medication_id,
-                        dose_number,
-                        time
-                    )
-
-                    VALUES (
-                        %s,
-                        %s,
-                        %s
-                    );
-                """, (
-                    medication_id,
-                    index,
-                    time
-                ))
-
-
-            cur.execute("""
-                UPDATE medications
-
-                SET times_per_day = %s
-
-                WHERE id = %s
-
-                AND user_id = %s;
-            """, (
-                len(times),
-                medication_id,
-                user_id
-            ))
-
-
-        conn.commit()
-
-
-# =========================================================
-# Reminder Buttons
+# REMINDER BUTTONS
 # =========================================================
 
 REMINDER_TAKEN = "✅ مصرف کردم"
-
-REMINDER_SNOOZE = (
-    "⏰ ۵ دقیقه بعد یادآوری کن"
-)
-
-REMINDER_NOT_TAKEN = (
-    "❌ مصرف نکردم"
-)
+REMINDER_SNOOZE = "⏰ ۵ دقیقه بعد یادآوری کن"
+REMINDER_NOT_TAKEN = "❌ مصرف نکردم"
 
 
-# =========================================================
-# Active Reminder
-# =========================================================
-
-def get_active_reminder(
-    user_id
-):
-
-    today = datetime.now(
-        IRAN_TZ
-    ).date()
-
+def get_active_reminder(user_id):
 
     with get_db_connection() as conn:
 
@@ -2323,65 +1439,22 @@ def get_active_reminder(
 
             cur.execute("""
                 SELECT
-
-                    ro.id,
-
-                    ro.medication_schedule_id,
-
-                    ro.status,
-
-                    ro.scheduled_time,
-
-                    ro.snooze_until,
-
-                    m.name,
-
-                    ms.dose_number
-
-                FROM reminder_occurrences ro
-
-                JOIN medication_schedules ms
-                    ON ms.id =
-                       ro.medication_schedule_id
-
-                JOIN medications m
-                    ON m.id =
-                       ms.medication_id
-
-                WHERE m.user_id = %s
-
-                AND m.is_active = TRUE
-
-                AND ro.reminder_date = %s
-
-                AND ro.status IN (
-                    'sent',
-                    'snoozed'
-                )
-
-                ORDER BY ro.id DESC
-
-                LIMIT 1;
-            """, (
-                user_id,
-                today
-            ))
+                    id,
+                    medication_id,
+                    schedule_id,
+                    scheduled_for,
+                    status
+                FROM reminder_occurrences
+                WHERE user_id = %s
+                  AND status IN ('sent', 'snoozed')
+                ORDER BY scheduled_for DESC
+                LIMIT 1
+            """, (user_id,))
 
             return cur.fetchone()
 
 
-# =========================================================
-# Reminder Actions
-# =========================================================
-
-def mark_reminder_taken(
-    reminder_id
-):
-
-    now = datetime.now(
-        IRAN_TZ
-    )
-
+def mark_reminder_taken(reminder_id):
 
     with get_db_connection() as conn:
 
@@ -2389,34 +1462,16 @@ def mark_reminder_taken(
 
             cur.execute("""
                 UPDATE reminder_occurrences
-
-                SET
-                    status = 'taken',
-                    taken_at = %s,
-                    snooze_until = NULL
-
+                SET status = 'taken',
+                    taken_at = CURRENT_TIMESTAMP
                 WHERE id = %s
+                  AND status IN ('sent', 'snoozed')
+            """, (reminder_id,))
 
-                AND status IN (
-                    'sent',
-                    'snoozed'
-                );
-            """, (
-                now,
-                reminder_id
-            ))
-
-        conn.commit()
+            conn.commit()
 
 
-def mark_reminder_not_taken(
-    reminder_id
-):
-
-    now = datetime.now(
-        IRAN_TZ
-    )
-
+def mark_reminder_not_taken(reminder_id):
 
     with get_db_connection() as conn:
 
@@ -2424,37 +1479,21 @@ def mark_reminder_not_taken(
 
             cur.execute("""
                 UPDATE reminder_occurrences
-
-                SET
-                    status = 'not_taken',
-                    not_taken_at = %s,
-                    snooze_until = NULL
-
+                SET status = 'not_taken',
+                    not_taken_at = CURRENT_TIMESTAMP
                 WHERE id = %s
+                  AND status IN ('sent', 'snoozed')
+            """, (reminder_id,))
 
-                AND status IN (
-                    'sent',
-                    'snoozed'
-                );
-            """, (
-                now,
-                reminder_id
-            ))
-
-        conn.commit()
+            conn.commit()
 
 
-def snooze_reminder(
-    reminder_id
-):
+def snooze_reminder(reminder_id):
 
     snooze_until = (
         datetime.now(IRAN_TZ)
-        + timedelta(
-            minutes=SNOOZE_MINUTES
-        )
+        + timedelta(minutes=SNOOZE_MINUTES)
     )
-
 
     with get_db_connection() as conn:
 
@@ -2462,31 +1501,17 @@ def snooze_reminder(
 
             cur.execute("""
                 UPDATE reminder_occurrences
-
-                SET
-                    status = 'snoozed',
-                    snooze_until = %s
-
+                SET status = 'snoozed',
+                    snoozed_until = %s
                 WHERE id = %s
-
-                AND status IN (
-                    'sent',
-                    'snoozed'
-                );
+                  AND status = 'sent'
             """, (
                 snooze_until,
                 reminder_id
             ))
 
-        conn.commit()
+            conn.commit()
 
-
-    return snooze_until
-
-
-# =========================================================
-# Handle Reminder Action
-# =========================================================
 
 def handle_reminder_action(
     chat_id,
@@ -2498,14 +1523,11 @@ def handle_reminder_action(
         user_id
     )
 
-
     if not reminder:
+
         return False
 
-
     reminder_id = reminder[0]
-    medication_name = reminder[5]
-
 
     if text == REMINDER_TAKEN:
 
@@ -2513,29 +1535,12 @@ def handle_reminder_action(
             reminder_id
         )
 
-
         send_message(
-
             chat_id,
-
-            f"✅ ثبت شد.\n\n"
-            f"مصرف «{medication_name}» "
-            "انجام‌شده ثبت شد. 💚\n\n"
-            "برای این نوبت دیگر یادآوری نمی‌کنم.",
-
-            buttons=[
-
-                ["📊 داشبورد من"],
-
-                ["💊 داروهای من"],
-
-                ["➕ افزودن دارو"]
-            ]
+            "✅ مصرف دارو ثبت شد."
         )
 
-
         return True
-
 
     if text == REMINDER_NOT_TAKEN:
 
@@ -2543,349 +1548,227 @@ def handle_reminder_action(
             reminder_id
         )
 
-
         send_message(
-
             chat_id,
-
-            f"ثبت شد. ❌\n\n"
-            f"نوبت «{medication_name}» "
-            "مصرف‌نشده ثبت شد.\n\n"
-            "برای این نوبت دیگر یادآوری نمی‌کنم."
+            "ثبت شد. امیدواریم مصرف بعدی را به‌موقع انجام دهید."
         )
 
-
         return True
-
 
     if text == REMINDER_SNOOZE:
 
-        snooze_until = snooze_reminder(
+        snooze_reminder(
             reminder_id
         )
 
-
-        time_text = snooze_until.strftime(
-            "%H:%M"
-        )
-
-
         send_message(
-
             chat_id,
-
-            f"باشه 🌱\n\n"
-            f"یادآوری «{medication_name}» "
-            f"برای ساعت {time_text} تنظیم شد.\n\n"
-            "۵ دقیقه دیگه دوباره یادآوری می‌کنم. ⏰",
-
-            buttons=[
-
-                [REMINDER_TAKEN],
-
-                [REMINDER_NOT_TAKEN],
-
-                [REMINDER_SNOOZE]
-            ]
+            "⏰ حتماً. ۵ دقیقه دیگر دوباره یادآوری می‌کنم."
         )
-
 
         return True
-
 
     return False
 
 
 # =========================================================
-# Create Due Occurrences
+# CREATE DUE OCCURRENCES
 # =========================================================
 
-def create_due_occurrences(
-    cur,
-    today,
-    now
-):
+def create_due_occurrences():
 
-    window_start = (
-        now
-        - timedelta(
-            minutes=REMINDER_GRACE_MINUTES
-        )
-    )
+    now = datetime.now(IRAN_TZ)
 
-
-    cur.execute("""
-        SELECT
-
-            ms.id,
-
-            ms.time
-
-        FROM medication_schedules ms
-
-        JOIN medications m
-            ON m.id =
-               ms.medication_id
-
-        WHERE m.is_active = TRUE
-
-        ORDER BY ms.time;
-    """)
-
-
-    schedules = cur.fetchall()
+    today = now.date()
 
     created = 0
 
+    with get_db_connection() as conn:
 
-    for schedule_id, scheduled_time in schedules:
+        with conn.cursor() as cur:
 
-        scheduled_datetime = schedule_to_datetime(
-            today,
-            scheduled_time
-        )
+            cur.execute("""
+                SELECT
+                    m.id,
+                    m.user_id,
+                    ms.id,
+                    ms.scheduled_time
+                FROM medications m
+                JOIN medication_schedules ms
+                    ON ms.medication_id = m.id
+                WHERE m.active = TRUE
+                  AND ms.active = TRUE
+            """)
 
+            rows = cur.fetchall()
 
-        if not scheduled_datetime:
-            continue
+            for row in rows:
 
+                medication_id = row[0]
+                user_id = row[1]
+                schedule_id = row[2]
+                scheduled_time = row[3]
 
-        if not (
-            window_start
-            <= scheduled_datetime
-            <= now
-        ):
-            continue
+                if not is_valid_time(
+                    scheduled_time
+                ):
+                    continue
 
+                scheduled_dt = schedule_to_datetime(
+                    today,
+                    scheduled_time
+                )
 
-        cur.execute("""
-            INSERT INTO reminder_occurrences (
+                earliest = (
+                    now
+                    - timedelta(
+                        minutes=REMINDER_GRACE_MINUTES
+                    )
+                )
 
-                medication_schedule_id,
+                # Only reminders whose scheduled time
+                # is within the last 10 minutes.
+                if not (
+                    earliest
+                    <= scheduled_dt
+                    <= now
+                ):
+                    continue
 
-                reminder_date,
+                cur.execute("""
+                    SELECT id
+                    FROM reminder_occurrences
+                    WHERE schedule_id = %s
+                      AND scheduled_for = %s
+                    LIMIT 1
+                """, (
+                    schedule_id,
+                    scheduled_dt
+                ))
 
-                scheduled_time,
+                exists = cur.fetchone()
 
-                status
+                if exists:
+                    continue
 
-            )
+                cur.execute("""
+                    INSERT INTO reminder_occurrences (
+                        medication_id,
+                        schedule_id,
+                        user_id,
+                        scheduled_for,
+                        status
+                    )
+                    VALUES (
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        'pending'
+                    )
+                """, (
+                    medication_id,
+                    schedule_id,
+                    user_id,
+                    scheduled_dt
+                ))
 
-            VALUES (
+                created += 1
 
-                %s,
-
-                %s,
-
-                %s,
-
-                'pending'
-
-            )
-
-            ON CONFLICT (
-
-                medication_schedule_id,
-
-                reminder_date
-
-            )
-
-            DO NOTHING;
-        """, (
-            schedule_id,
-            today,
-            scheduled_time
-        ))
-
-
-        if cur.rowcount > 0:
-            created += 1
-
+            conn.commit()
 
     return created
 
 
 # =========================================================
-# Pending Reminders
+# GET PENDING REMINDERS
 # =========================================================
 
-def get_pending_reminders(
-    cur,
-    today,
-    now
-):
+def get_pending_reminders():
 
-    window_start = (
-        now
-        - timedelta(
-            minutes=REMINDER_GRACE_MINUTES
-        )
-    )
+    now = datetime.now(IRAN_TZ)
 
+    with get_db_connection() as conn:
 
-    cur.execute("""
-        SELECT
+        with conn.cursor() as cur:
 
-            ro.id,
+            cur.execute("""
+                SELECT
+                    ro.id,
+                    ro.user_id,
+                    u.chat_id,
+                    m.name,
+                    ro.scheduled_for,
+                    ro.status
+                FROM reminder_occurrences ro
 
-            ro.medication_schedule_id,
+                JOIN users u
+                    ON u.id = ro.user_id
 
-            ro.scheduled_time,
+                JOIN medications m
+                    ON m.id = ro.medication_id
 
-            m.name,
+                WHERE ro.status = 'pending'
 
-            u.bale_user_id,
+                  AND ro.scheduled_for
+                      BETWEEN %s AND %s
 
-            u.display_name,
+                ORDER BY ro.scheduled_for
+            """, (
+                now - timedelta(
+                    minutes=REMINDER_GRACE_MINUTES
+                ),
+                now
+            ))
 
-            ms.dose_number
-
-        FROM reminder_occurrences ro
-
-        JOIN medication_schedules ms
-            ON ms.id =
-               ro.medication_schedule_id
-
-        JOIN medications m
-            ON m.id =
-               ms.medication_id
-
-        JOIN users u
-            ON u.id =
-               m.user_id
-
-        WHERE ro.reminder_date = %s
-
-        AND ro.status = 'pending'
-
-        AND m.is_active = TRUE
-
-        ORDER BY
-
-            ro.scheduled_time,
-
-            ro.id;
-    """, (
-        today,
-    ))
-
-
-    reminders = cur.fetchall()
-
-    valid_reminders = []
-
-
-    for reminder in reminders:
-
-        scheduled_datetime = schedule_to_datetime(
-            today,
-            reminder[2]
-        )
-
-
-        if not scheduled_datetime:
-            continue
-
-
-        if (
-            window_start
-            <= scheduled_datetime
-            <= now
-        ):
-
-            valid_reminders.append(
-                reminder
-            )
-
-
-    return valid_reminders
+            return cur.fetchall()
 
 
 # =========================================================
-# Normal Reminder
+# SEND NORMAL REMINDER
 # =========================================================
 
-def send_normal_reminder(
-    reminder,
-    now,
-    cur
-):
+def send_normal_reminder(reminder):
 
     reminder_id = reminder[0]
+    chat_id = reminder[2]
     medication_name = reminder[3]
-    bale_user_id = reminder[4]
-    display_name = reminder[5]
-    dose_number = reminder[6]
-    medication_time = reminder[2]
 
-
-    greeting = (
-        f"{display_name} جان 🌱"
-        if display_name
-        else "دوست عزیز 🌱"
+    text = (
+        f"💊 وقت مصرف داروی «{medication_name}» است.\n\n"
+        "لطفاً وضعیت مصرف را انتخاب کنید:"
     )
-
-
-    message = (
-
-        "⏰ یادآوری مصرف دارو\n\n"
-
-        f"{greeting}\n\n"
-
-        f"💊 زمان مصرف "
-        f"«{medication_name}» "
-        "رسیده است.\n\n"
-
-        f"🕐 ساعت: {medication_time}\n"
-
-        f"💊 نوبت مصرف: {dose_number}\n\n"
-
-        "اگر مصرف کردی، ثبتش کن."
-    )
-
 
     response = send_message(
-
-        bale_user_id,
-
-        message,
-
-        buttons=[
-
+        chat_id,
+        text,
+        [
             [REMINDER_TAKEN],
-
             [REMINDER_SNOOZE],
-
             [REMINDER_NOT_TAKEN]
         ]
     )
 
-
-    # فقط در صورت موفقیت واقعی Bale وضعیت را sent می‌کنیم
+    # IMPORTANT:
+    # Only mark as sent if Bale really accepted the message.
     if response and response.ok:
 
-        cur.execute("""
-            UPDATE reminder_occurrences
+        with get_db_connection() as conn:
 
-            SET
+            with conn.cursor() as cur:
 
-                status = 'sent',
+                cur.execute("""
+                    UPDATE reminder_occurrences
+                    SET status = 'sent',
+                        sent_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                      AND status = 'pending'
+                """, (reminder_id,))
 
-                sent_at = %s
-
-            WHERE id = %s
-
-            AND status = 'pending';
-        """, (
-            now,
-            reminder_id
-        ))
+                conn.commit()
 
         return True
 
-
-    # اگر ارسال شکست خورد، Reminder همچنان pending می‌ماند
     print(
         "Reminder was NOT marked as sent:",
         reminder_id
@@ -2895,87 +1778,82 @@ def send_normal_reminder(
 
 
 # =========================================================
-# Snoozed Reminder
+# SEND SNOOZED REMINDER
 # =========================================================
 
-def send_snoozed_reminder(
-    reminder,
-    now,
-    cur
-):
+def get_snoozed_reminders():
+
+    now = datetime.now(IRAN_TZ)
+
+    with get_db_connection() as conn:
+
+        with conn.cursor() as cur:
+
+            cur.execute("""
+                SELECT
+                    ro.id,
+                    ro.user_id,
+                    u.chat_id,
+                    m.name,
+                    ro.snoozed_until,
+                    ro.status
+                FROM reminder_occurrences ro
+
+                JOIN users u
+                    ON u.id = ro.user_id
+
+                JOIN medications m
+                    ON m.id = ro.medication_id
+
+                WHERE ro.status = 'snoozed'
+                  AND ro.snoozed_until <= %s
+
+                ORDER BY ro.snoozed_until
+            """, (now,))
+
+            return cur.fetchall()
+
+
+def send_snoozed_reminder(reminder):
 
     reminder_id = reminder[0]
-    medication_time = reminder[1]
+    chat_id = reminder[2]
     medication_name = reminder[3]
-    bale_user_id = reminder[4]
-    display_name = reminder[5]
-    dose_number = reminder[6]
 
-
-    greeting = (
-        f"{display_name} جان 🌱"
-        if display_name
-        else "دوست عزیز 🌱"
+    text = (
+        f"⏰ یادآوری مجدد\n\n"
+        f"زمان مصرف «{medication_name}» رسیده است.\n\n"
+        "آیا دارو را مصرف کردید؟"
     )
-
-
-    message = (
-
-        "⏰ یادآوری مجدد مصرف دارو\n\n"
-
-        f"{greeting}\n\n"
-
-        f"💊 داروی «{medication_name}» "
-        "هنوز در انتظار ثبت وضعیت است.\n\n"
-
-        f"🕐 نوبت: {medication_time}\n"
-
-        f"💊 شماره نوبت: {dose_number}\n\n"
-
-        "آیا مصرفش کردی؟"
-    )
-
 
     response = send_message(
-
-        bale_user_id,
-
-        message,
-
-        buttons=[
-
+        chat_id,
+        text,
+        [
             [REMINDER_TAKEN],
-
-            [REMINDER_NOT_TAKEN],
-
-            [REMINDER_SNOOZE]
+            [REMINDER_SNOOZE],
+            [REMINDER_NOT_TAKEN]
         ]
     )
 
-
     if response and response.ok:
 
-        cur.execute("""
-            UPDATE reminder_occurrences
+        with get_db_connection() as conn:
 
-            SET
+            with conn.cursor() as cur:
 
-                status = 'sent',
+                cur.execute("""
+                    UPDATE reminder_occurrences
+                    SET status = 'sent',
+                        sent_at = CURRENT_TIMESTAMP,
+                        snoozed_until = NULL
+                    WHERE id = %s
+                      AND status = 'snoozed'
+                """, (reminder_id,))
 
-                sent_at = %s,
-
-                snooze_until = NULL
-
-            WHERE id = %s
-
-            AND status = 'snoozed';
-        """, (
-            now,
-            reminder_id
-        ))
+                conn.commit()
 
         return True
-
 
     print(
         "Snoozed reminder was NOT marked as sent:",
@@ -2986,7 +1864,7 @@ def send_snoozed_reminder(
 
 
 # =========================================================
-# Reminder System
+# CHECK REMINDERS
 # =========================================================
 
 @app.route(
@@ -2995,213 +1873,105 @@ def send_snoozed_reminder(
 )
 def check_reminders():
 
-    now = datetime.now(
-        IRAN_TZ
-    )
-
-    today = now.date()
-
-    sent_count = 0
-    snooze_count = 0
-    created_count = 0
-    error_count = 0
-
-
     try:
 
-        with get_db_connection() as conn:
+        created = create_due_occurrences()
 
-            with conn.cursor() as cur:
+        pending = get_pending_reminders()
 
-                created_count = create_due_occurrences(
-                    cur,
-                    today,
-                    now
+        snoozed = get_snoozed_reminders()
+
+        sent = 0
+        errors = 0
+
+        # -------------------------------------------------
+        # NORMAL REMINDERS
+        # -------------------------------------------------
+
+        for reminder in pending:
+
+            try:
+
+                success = send_normal_reminder(
+                    reminder
                 )
 
+                if success:
+                    sent += 1
+                else:
+                    errors += 1
 
-                reminders = get_pending_reminders(
-                    cur,
-                    today,
-                    now
+            except Exception as e:
+
+                errors += 1
+
+                print(
+                    "Normal reminder exception:",
+                    repr(e)
                 )
 
+        # -------------------------------------------------
+        # SNOOZED REMINDERS
+        # -------------------------------------------------
 
-                for reminder in reminders:
+        for reminder in snoozed:
 
-                    if send_normal_reminder(
-                        reminder,
-                        now,
-                        cur
-                    ):
+            try:
 
-                        sent_count += 1
+                success = send_snoozed_reminder(
+                    reminder
+                )
 
-                    else:
+                if success:
+                    sent += 1
+                else:
+                    errors += 1
 
-                        error_count += 1
+            except Exception as e:
 
+                errors += 1
 
-                cur.execute("""
-                    SELECT
-
-                        ro.id,
-
-                        ro.scheduled_time,
-
-                        ro.snooze_until,
-
-                        m.name,
-
-                        u.bale_user_id,
-
-                        u.display_name,
-
-                        ms.dose_number
-
-                    FROM reminder_occurrences ro
-
-                    JOIN medication_schedules ms
-                        ON ms.id =
-                           ro.medication_schedule_id
-
-                    JOIN medications m
-                        ON m.id =
-                           ms.medication_id
-
-                    JOIN users u
-                        ON u.id =
-                           m.user_id
-
-                    WHERE ro.reminder_date = %s
-
-                    AND ro.status = 'snoozed'
-
-                    AND ro.snooze_until <= %s
-
-                    AND m.is_active = TRUE
-
-                    ORDER BY
-
-                        ro.snooze_until,
-
-                        ro.id;
-                """, (
-                    today,
-                    now
-                ))
-
-
-                snoozed = cur.fetchall()
-
-
-                for reminder in snoozed:
-
-                    if send_snoozed_reminder(
-                        reminder,
-                        now,
-                        cur
-                    ):
-
-                        snooze_count += 1
-
-                    else:
-
-                        error_count += 1
-
-
-            conn.commit()
-
+                print(
+                    "Snoozed reminder exception:",
+                    repr(e)
+                )
 
         return jsonify({
-
             "status": "ok",
-
-            "current_time":
-                now.strftime("%H:%M:%S"),
-
-            "created":
-                created_count,
-
-            "sent":
-                sent_count,
-
-            "snoozed_sent":
-                snooze_count,
-
-            "errors":
-                error_count
+            "created": created,
+            "sent": sent,
+            "errors": errors
         })
-
 
     except Exception as e:
 
         print(
-            "Reminder system error:",
+            "check-reminders error:",
             repr(e)
         )
 
-
         return jsonify({
-
             "status": "error",
-
-            "error": str(e)
-
+            "message": str(e)
         }), 500
 
 
 # =========================================================
-# Cancel
+# HOME
 # =========================================================
 
-def cancel_conversation(
-    chat_id,
-    user_id
-):
+@app.route("/", methods=["GET"])
+def home():
 
-    clear_session(user_id)
-
-
-    with get_db_connection() as conn:
-
-        with conn.cursor() as cur:
-
-            cur.execute("""
-                SELECT display_name
-
-                FROM users
-
-                WHERE id = %s;
-            """, (
-                user_id,
-            ))
-
-            row = cur.fetchone()
-
-
-    name = (
-        row[0]
-        if row and row[0]
-        else "دوست من"
-    )
-
-
-    main_menu(
-        chat_id,
-        name
-    )
-
-
-    set_session(
-        user_id,
-        "MAIN_MENU",
-        {}
-    )
+    return jsonify({
+        "status": "ok",
+        "service": "Mahroo",
+        "message": "Mahroo backend is running."
+    })
 
 
 # =========================================================
-# Message Handler
+# RECEIVE MESSAGE
 # =========================================================
 
 @app.route(
@@ -3210,80 +1980,116 @@ def cancel_conversation(
 )
 def receive_message():
 
-    data = request.json
-
-
-    print(
-        "Received:",
-        data
-    )
-
-
     try:
 
-        message = data.get(
-            "message",
-            {}
+        data = request.get_json(
+            silent=True
+        ) or {}
+
+        print(
+            "Incoming Bale message:",
+            json.dumps(
+                data,
+                ensure_ascii=False
+            )
         )
 
+        # -------------------------------------------------
+        # EXTRACT MESSAGE
+        # -------------------------------------------------
 
-        chat = message.get(
-            "chat",
-            {}
+        message = (
+            data.get("message")
+            or data.get("result")
+            or data
         )
 
-
-        user = message.get(
-            "from",
-            {}
+        user = (
+            message.get("from")
+            or message.get("user")
+            or {}
         )
 
-
-        chat_id = chat.get(
-            "id"
+        chat = (
+            message.get("chat")
+            or {}
         )
 
-
-        text = message.get(
-            "text",
-            ""
-        ).strip()
-
-
-        db_user = get_or_create_user(
-            user
+        text = (
+            message.get("text")
+            or message.get("message")
+            or ""
         )
 
+        text = clean_drug_text(text)
 
-        if not db_user:
+        # -------------------------------------------------
+        # CHAT ID
+        # -------------------------------------------------
+
+        chat_id = (
+            chat.get("id")
+            or message.get("chat_id")
+            or user.get("chat_id")
+            or user.get("id")
+        )
+
+        if chat_id is None:
+
+            print(
+                "ERROR: chat_id not found"
+            )
 
             return jsonify({
                 "status": "ok"
             })
 
+        chat_id = str(chat_id)
 
-        user_id = db_user["id"]
+        # -------------------------------------------------
+        # USER
+        # -------------------------------------------------
 
+        user_id = get_or_create_user(
+            {
+                "id": user.get("id")
+                    or user.get("user_id")
+                    or chat_id,
 
-        # =====================================================
-        # Reminder Buttons
-        # =====================================================
+                "chat_id": chat_id,
+
+                "first_name": user.get(
+                    "first_name",
+                    ""
+                ),
+
+                "name": user.get(
+                    "name",
+                    ""
+                ),
+
+                "username": user.get(
+                    "username",
+                    ""
+                )
+            }
+        )
+
+        # =================================================
+        # REMINDER BUTTONS
+        # =================================================
 
         if text in [
-
             REMINDER_TAKEN,
             REMINDER_SNOOZE,
             REMINDER_NOT_TAKEN
-
         ]:
 
             handled = handle_reminder_action(
-
                 chat_id,
                 user_id,
                 text
             )
-
 
             if handled:
 
@@ -3291,17 +2097,14 @@ def receive_message():
                     "status": "ok"
                 })
 
-
-        # =====================================================
-        # Cancel
-        # =====================================================
+        # =================================================
+        # GLOBAL CANCEL
+        # =================================================
 
         if text in [
-
             "❌ لغو",
-            "/cancel",
-            "لغو"
-
+            "لغو",
+            "/cancel"
         ]:
 
             cancel_conversation(
@@ -3313,61 +2116,38 @@ def receive_message():
                 "status": "ok"
             })
 
-
-        # =====================================================
-        # Start
-        # =====================================================
+        # =================================================
+        # GLOBAL MAIN MENU
+        # =================================================
 
         if text in [
-
-            "/start",
-            "شروع",
-            "سلام"
-
+            "↩️ منوی اصلی",
+            "/start"
         ]:
 
             start_conversation(
                 chat_id,
-                db_user
+                user_id
             )
 
             return jsonify({
                 "status": "ok"
             })
 
+        # =================================================
+        # SESSION
+        # =================================================
 
-        # =====================================================
-        # Session
-        # =====================================================
-
-        session = get_session(
+        state, session_data = get_session(
             user_id
         )
 
+        if not state:
+            state = "MAIN_MENU"
 
-        state = (
-
-            session["state"]
-
-            if session
-
-            else "MAIN_MENU"
-        )
-
-
-        session_data = (
-
-            session["data"]
-
-            if session
-
-            else {}
-        )
-
-
-        # =====================================================
+        # =================================================
         # ASK NAME
-        # =====================================================
+        # =================================================
 
         if state == "ASK_NAME":
 
@@ -3375,67 +2155,96 @@ def receive_message():
 
                 send_message(
                     chat_id,
-                    "لطفاً اسمتون رو وارد کنید 🙂"
+                    "لطفاً نام خود را وارد کنید."
                 )
 
                 return jsonify({
                     "status": "ok"
                 })
-
 
             save_display_name(
                 user_id,
                 text
             )
 
-
-            set_session(
-                user_id,
-                "MAIN_MENU",
-                {}
+            send_message(
+                chat_id,
+                f"سلام {text} 🌷"
             )
-
 
             main_menu(
                 chat_id,
-                text
+                user_id
             )
-
 
             return jsonify({
                 "status": "ok"
             })
 
-
-        # =====================================================
+        # =================================================
         # MAIN MENU
-        # =====================================================
+        # =================================================
 
         if state == "MAIN_MENU":
 
+            # ---------------------------------------------
+            # DASHBOARD
+            # ---------------------------------------------
+
             if text == "📊 داشبورد من":
 
-                show_dashboard(
-                    chat_id,
+                medications = get_user_medications(
                     user_id
+                )
+
+                active_count = sum(
+                    1
+                    for medication in medications
+                    if medication[4]
+                )
+
+                send_message(
+                    chat_id,
+                    "📊 داشبورد مهرو\n\n"
+                    f"💊 تعداد داروهای فعال: "
+                    f"{active_count}",
+                    [
+                        ["💊 داروهای من"],
+                        ["➕ افزودن دارو"],
+                        ["🔎 جستجوی دارو"],
+                        ["💬 سؤال دارویی"],
+                        ["↩️ منوی اصلی"]
+                    ]
                 )
 
                 return jsonify({
                     "status": "ok"
                 })
 
+            # ---------------------------------------------
+            # ADD MEDICATION
+            # ---------------------------------------------
 
             if text == "➕ افزودن دارو":
 
-                start_add_medication(
+                set_session(
+                    user_id,
+                    "ASK_MEDICATION_NAME"
+                )
+
+                send_message(
                     chat_id,
-                    user_id
+                    "💊 نام دارویی که می‌خواهید "
+                    "به برنامه خود اضافه کنید را وارد کنید:"
                 )
 
                 return jsonify({
                     "status": "ok"
                 })
 
+            # ---------------------------------------------
+            # MEDICATION LIST
+            # ---------------------------------------------
 
             if text == "💊 داروهای من":
 
@@ -3448,10 +2257,9 @@ def receive_message():
                     "status": "ok"
                 })
 
-
-            # =================================================
-            # Drug Search
-            # =================================================
+            # ---------------------------------------------
+            # DRUG DATABASE SEARCH
+            # ---------------------------------------------
 
             if text == "🔎 جستجوی دارو":
 
@@ -3464,48 +2272,53 @@ def receive_message():
                     "status": "ok"
                 })
 
+            # ---------------------------------------------
+            # AI DRUG QUESTION
+            # ---------------------------------------------
 
-            if text == "↩️ منوی اصلی":
+            if text == "💬 سؤال دارویی":
 
-                start_conversation(
+                start_drug_question(
                     chat_id,
-                    db_user
+                    user_id
                 )
 
                 return jsonify({
                     "status": "ok"
                 })
 
+            # ---------------------------------------------
+            # MAIN MENU
+            # ---------------------------------------------
+
+            if text == "↩️ منوی اصلی":
+
+                main_menu(
+                    chat_id,
+                    user_id
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            # ---------------------------------------------
+            # UNKNOWN MAIN MENU TEXT
+            # ---------------------------------------------
 
             send_message(
-
                 chat_id,
-
-                "لطفاً یکی از گزینه‌های منو رو انتخاب کن.",
-
-                buttons=[
-
-                    ["📊 داشبورد من"],
-
-                    ["➕ افزودن دارو"],
-
-                    ["💊 داروهای من"],
-
-                    ["🔎 جستجوی دارو"],
-
-                    ["❌ لغو"]
-                ]
+                "لطفاً یکی از گزینه‌های منو را انتخاب کنید.",
+                MAIN_MENU_BUTTONS
             )
-
 
             return jsonify({
                 "status": "ok"
             })
 
-
-        # =====================================================
-        # DRUG SEARCH
-        # =====================================================
+        # =================================================
+        # DRUG SEARCH STATE
+        # =================================================
 
         if state == "ASK_DRUG_SEARCH":
 
@@ -3513,13 +2326,12 @@ def receive_message():
 
                 send_message(
                     chat_id,
-                    "لطفاً نام دارو را وارد کن."
+                    "لطفاً نام دارو را وارد کنید."
                 )
 
                 return jsonify({
                     "status": "ok"
                 })
-
 
             try:
 
@@ -3527,64 +2339,46 @@ def receive_message():
                     text
                 )
 
-
                 if not drug:
 
                     send_message(
-
                         chat_id,
-
-                        f"❌ داروی «{text}» "
+                        f"❌ دارویی با نام «{text}» "
                         "در پایگاه داده پیدا نشد.\n\n"
-
-                        "نام دارو را دوباره وارد کن.\n"
-                        "مثلاً:\n"
-                        "acetaminophen"
+                        "لطفاً نام دارو را دوباره وارد کنید.",
+                        [
+                            ["↩️ منوی اصلی"],
+                            ["❌ لغو"]
+                        ]
                     )
 
                     return jsonify({
                         "status": "ok"
                     })
 
-
-                drug_text = format_drug_result(
+                result_text = format_drug_result(
                     drug
                 )
 
-
                 send_message(
-
                     chat_id,
-
-                    drug_text,
-
-                    buttons=[
-
-                        ["🔎 جستجوی دارو"],
-
-                        ["📊 داشبورد من"],
-
+                    result_text,
+                    [
+                        ["🔎 جستجوی داروی دیگر"],
+                        ["💬 سؤال دارویی"],
                         ["↩️ منوی اصلی"]
                     ]
                 )
 
-
-                # بعد از نمایش نتیجه،
-                # کاربر می‌تواند دوباره دارو جستجو کند.
+                # Keep user in search mode
                 set_session(
-
                     user_id,
-
-                    "ASK_DRUG_SEARCH",
-
-                    {}
+                    "ASK_DRUG_SEARCH"
                 )
-
 
                 return jsonify({
                     "status": "ok"
                 })
-
 
             except Exception as e:
 
@@ -3593,32 +2387,708 @@ def receive_message():
                     repr(e)
                 )
 
-
                 send_message(
-
                     chat_id,
-
-                    "❌ هنگام دریافت اطلاعات دارو "
-                    "خطایی رخ داد.\n\n"
-
-                    "لطفاً دوباره تلاش کن."
+                    "❌ هنگام جستجوی دارو خطایی رخ داد.\n"
+                    "لطفاً دوباره تلاش کنید."
                 )
-
 
                 return jsonify({
                     "status": "ok"
                 })
 
+        # =================================================
+        # DIRECT DRUG SEARCH AGAIN BUTTON
+        # =================================================
 
-        # =====================================================
-        # MEDICATION BUTTON
-        # =====================================================
+        if text == "🔎 جستجوی داروی دیگر":
+
+            start_drug_search(
+                chat_id,
+                user_id
+            )
+
+            return jsonify({
+                "status": "ok"
+            })
+
+        # =================================================
+        # AI DRUG QUESTION
+        # =================================================
+
+        if state == "ASK_DRUG_QUESTION":
+
+            if not text:
+
+                send_message(
+                    chat_id,
+                    "لطفاً سؤال خود را بنویسید."
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            try:
+
+                # -----------------------------------------
+                # SEARCH POSSIBLE DRUGS IN QUESTION
+                # -----------------------------------------
+
+                drugs = find_drugs_in_question(
+                    text
+                )
+
+                # -----------------------------------------
+                # BUILD CONTEXT
+                # -----------------------------------------
+
+                contexts = []
+
+                for drug in drugs[:3]:
+
+                    context = drug_to_context(
+                        drug
+                    )
+
+                    if context:
+
+                        contexts.append(
+                            context
+                        )
+
+                drug_context = (
+                    "\n\n"
+                    "====================\n\n"
+                ).join(contexts)
+
+                # -----------------------------------------
+                # SEND TO LLM
+                # -----------------------------------------
+
+                answer = ask_llm(
+                    text,
+                    drug_context
+                )
+
+                # -----------------------------------------
+                # LLM FAILURE
+                # -----------------------------------------
+
+                if not answer:
+
+                    send_message(
+                        chat_id,
+                        "❌ متأسفانه در دریافت پاسخ "
+                        "از دستیار هوشمند مشکلی پیش آمد.\n\n"
+                        "لطفاً چند لحظه بعد دوباره تلاش کنید.",
+                        [
+                            ["💬 سؤال جدید"],
+                            ["🔎 جستجوی دارو"],
+                            ["↩️ منوی اصلی"]
+                        ]
+                    )
+
+                    set_session(
+                        user_id,
+                        "ASK_DRUG_QUESTION"
+                    )
+
+                    return jsonify({
+                        "status": "ok"
+                    })
+
+                # -----------------------------------------
+                # SEND AI ANSWER TO BALE
+                # -----------------------------------------
+
+                send_message(
+                    chat_id,
+                    "🤖 پاسخ مهرو:\n\n"
+                    + answer,
+                    [
+                        ["💬 سؤال جدید"],
+                        ["🔎 جستجوی دارو"],
+                        ["↩️ منوی اصلی"]
+                    ]
+                )
+
+                # Keep AI question mode
+                set_session(
+                    user_id,
+                    "ASK_DRUG_QUESTION"
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            except Exception as e:
+
+                print(
+                    "AI drug question error:",
+                    repr(e)
+                )
+
+                send_message(
+                    chat_id,
+                    "❌ هنگام پردازش سؤال مشکلی رخ داد.\n"
+                    "لطفاً دوباره تلاش کنید."
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+        # =================================================
+        # NEW AI QUESTION
+        # =================================================
+
+        if text == "💬 سؤال جدید":
+
+            start_drug_question(
+                chat_id,
+                user_id
+            )
+
+            return jsonify({
+                "status": "ok"
+            })
+
+        # =================================================
+        # MEDICATION LIST
+        # =================================================
+
+        if state == "MEDICATION_LIST":
+
+            if text == "➕ افزودن دارو":
+
+                set_session(
+                    user_id,
+                    "ASK_MEDICATION_NAME"
+                )
+
+                send_message(
+                    chat_id,
+                    "💊 نام دارو را وارد کنید:"
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            if text == "🔎 جستجوی دارو":
+
+                start_drug_search(
+                    chat_id,
+                    user_id
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            if text == "💬 سؤال دارویی":
+
+                start_drug_question(
+                    chat_id,
+                    user_id
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            medication = get_medication_by_button(
+                user_id,
+                text
+            )
+
+            if medication:
+
+                show_medication_management(
+                    chat_id,
+                    user_id,
+                    medication[0]
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+        # =================================================
+        # MEDICATION MANAGEMENT
+        # =================================================
+
+        if state == "MEDICATION_MANAGEMENT":
+
+            medication_id = session_data.get(
+                "medication_id"
+            )
+
+            if not medication_id:
+
+                show_medications(
+                    chat_id,
+                    user_id
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            if text == "↩️ داروهای من":
+
+                show_medications(
+                    chat_id,
+                    user_id
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            if text == "🗑 حذف دارو":
+
+                set_session(
+                    user_id,
+                    "CONFIRM_DELETE",
+                    {
+                        "medication_id": medication_id
+                    }
+                )
+
+                send_message(
+                    chat_id,
+                    "آیا از حذف این دارو مطمئن هستید؟",
+                    [
+                        ["✅ بله، حذف شود"],
+                        ["❌ لغو"]
+                    ]
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            if text == "✏️ تغییر زمان مصرف":
+
+                set_session(
+                    user_id,
+                    "EDIT_TIMES",
+                    {
+                        "medication_id": medication_id
+                    }
+                )
+
+                send_message(
+                    chat_id,
+                    "⏰ زمان‌های مصرف جدید را وارد کنید.\n\n"
+                    "مثلاً اگر روزی ۲ بار است:\n"
+                    "08:00, 20:00"
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+        # =================================================
+        # CONFIRM DELETE
+        # =================================================
+
+        if state == "CONFIRM_DELETE":
+
+            medication_id = session_data.get(
+                "medication_id"
+            )
+
+            if text == "✅ بله، حذف شود":
+
+                with get_db_connection() as conn:
+
+                    with conn.cursor() as cur:
+
+                        cur.execute("""
+                            DELETE FROM medications
+                            WHERE id = %s
+                              AND user_id = %s
+                        """, (
+                            medication_id,
+                            user_id
+                        ))
+
+                        conn.commit()
+
+                send_message(
+                    chat_id,
+                    "🗑 دارو حذف شد."
+                )
+
+                show_medications(
+                    chat_id,
+                    user_id
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+        # =================================================
+        # ASK MEDICATION NAME
+        # =================================================
+
+        if state == "ASK_MEDICATION_NAME":
+
+            if not text:
+
+                send_message(
+                    chat_id,
+                    "لطفاً نام دارو را وارد کنید."
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            set_session(
+                user_id,
+                "ASK_TIMES_PER_DAY",
+                {
+                    "medication_name": text
+                }
+            )
+
+            send_message(
+                chat_id,
+                "🔢 دارو چند بار در روز مصرف می‌شود؟\n\n"
+                "مثلاً: 2"
+            )
+
+            return jsonify({
+                "status": "ok"
+            })
+
+        # =================================================
+        # ASK TIMES PER DAY
+        # =================================================
+
+        if state == "ASK_TIMES_PER_DAY":
+
+            try:
+
+                doses_per_day = int(text)
+
+                if not (
+                    1
+                    <= doses_per_day
+                    <= 20
+                ):
+                    raise ValueError
+
+            except Exception:
+
+                send_message(
+                    chat_id,
+                    "لطفاً یک عدد معتبر وارد کنید.\n"
+                    "مثلاً: 2"
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            session_data[
+                "doses_per_day"
+            ] = doses_per_day
+
+            set_session(
+                user_id,
+                "ASK_NUMBER_OF_DOSES",
+                session_data
+            )
+
+            send_message(
+                chat_id,
+                "💊 تعداد کل دوز موردنظر را وارد کنید."
+            )
+
+            return jsonify({
+                "status": "ok"
+            })
+
+        # =================================================
+        # ASK NUMBER OF DOSES
+        # =================================================
+
+        if state == "ASK_NUMBER_OF_DOSES":
+
+            try:
+
+                number_of_doses = int(text)
+
+                if number_of_doses < 1:
+                    raise ValueError
+
+            except Exception:
+
+                send_message(
+                    chat_id,
+                    "لطفاً یک عدد معتبر وارد کنید."
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            session_data[
+                "number_of_doses"
+            ] = number_of_doses
+
+            session_data[
+                "times"
+            ] = []
+
+            set_session(
+                user_id,
+                "ASK_TIME",
+                session_data
+            )
+
+            send_message(
+                chat_id,
+                "⏰ زمان مصرف اول را وارد کنید.\n\n"
+                "مثلاً: 08:00"
+            )
+
+            return jsonify({
+                "status": "ok"
+            })
+
+        # =================================================
+        # ASK TIME
+        # =================================================
+
+        if state == "ASK_TIME":
+
+            if not is_valid_time(text):
+
+                send_message(
+                    chat_id,
+                    "⏰ زمان واردشده معتبر نیست.\n"
+                    "لطفاً به شکل HH:MM وارد کنید.\n\n"
+                    "مثلاً: 08:00"
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            session_data[
+                "times"
+            ].append(text)
+
+            current_count = len(
+                session_data["times"]
+            )
+
+            required_count = session_data[
+                "doses_per_day"
+            ]
+
+            if current_count < required_count:
+
+                set_session(
+                    user_id,
+                    "ASK_TIME",
+                    session_data
+                )
+
+                send_message(
+                    chat_id,
+                    f"⏰ زمان مصرف "
+                    f"{current_count + 1} "
+                    f"را وارد کنید:"
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            # All times collected
+            set_session(
+                user_id,
+                "CONFIRM_MEDICATION",
+                session_data
+            )
+
+            times_text = "\n".join(
+                f"• {time}"
+                for time in session_data["times"]
+            )
+
+            send_message(
+                chat_id,
+                "💊 اطلاعات دارو:\n\n"
+                f"نام: {session_data['medication_name']}\n"
+                f"دفعات روزانه: {session_data['doses_per_day']}\n"
+                f"تعداد دوز: {session_data['number_of_doses']}\n\n"
+                f"⏰ زمان‌ها:\n"
+                f"{times_text}\n\n"
+                "آیا اطلاعات صحیح است؟",
+                [
+                    ["✅ ثبت دارو"],
+                    ["❌ لغو"]
+                ]
+            )
+
+            return jsonify({
+                "status": "ok"
+            })
+
+        # =================================================
+        # CONFIRM MEDICATION
+        # =================================================
+
+        if state == "CONFIRM_MEDICATION":
+
+            if text == "✅ ثبت دارو":
+
+                save_medication(
+                    user_id=user_id,
+                    name=session_data[
+                        "medication_name"
+                    ],
+                    doses_per_day=session_data[
+                        "doses_per_day"
+                    ],
+                    number_of_doses=session_data[
+                        "number_of_doses"
+                    ],
+                    times=session_data[
+                        "times"
+                    ]
+                )
+
+                send_message(
+                    chat_id,
+                    "✅ دارو با موفقیت ثبت شد."
+                )
+
+                main_menu(
+                    chat_id,
+                    user_id
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+        # =================================================
+        # EDIT TIMES
+        # =================================================
+
+        if state == "EDIT_TIMES":
+
+            medication_id = session_data.get(
+                "medication_id"
+            )
+
+            raw_times = [
+                x.strip()
+                for x in text.split(",")
+                if x.strip()
+            ]
+
+            if not raw_times:
+
+                send_message(
+                    chat_id,
+                    "لطفاً زمان‌ها را وارد کنید.\n"
+                    "مثلاً:\n"
+                    "08:00, 20:00"
+                )
+
+                return jsonify({
+                    "status": "ok"
+                })
+
+            for time in raw_times:
+
+                if not is_valid_time(time):
+
+                    send_message(
+                        chat_id,
+                        f"زمان «{time}» معتبر نیست.\n"
+                        "فرمت صحیح: HH:MM"
+                    )
+
+                    return jsonify({
+                        "status": "ok"
+                    })
+
+            with get_db_connection() as conn:
+
+                with conn.cursor() as cur:
+
+                    cur.execute("""
+                        UPDATE medication_schedules
+                        SET active = FALSE
+                        WHERE medication_id = %s
+                    """, (
+                        medication_id,
+                    ))
+
+                    for time in raw_times:
+
+                        cur.execute("""
+                            INSERT INTO medication_schedules (
+                                medication_id,
+                                scheduled_time,
+                                active
+                            )
+                            VALUES (%s, %s, TRUE)
+                        """, (
+                            medication_id,
+                            time
+                        ))
+
+                    cur.execute("""
+                        UPDATE medications
+                        SET doses_per_day = %s,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                          AND user_id = %s
+                    """, (
+                        len(raw_times),
+                        medication_id,
+                        user_id
+                    ))
+
+                    conn.commit()
+
+            send_message(
+                chat_id,
+                "✅ زمان‌های مصرف با موفقیت تغییر کرد."
+            )
+
+            show_medication_management(
+                chat_id,
+                user_id,
+                medication_id
+            )
+
+            return jsonify({
+                "status": "ok"
+            })
+
+        # =================================================
+        # MEDICATION BUTTON FALLBACK
+        # =================================================
 
         medication = get_medication_by_button(
             user_id,
             text
         )
-
 
         if medication:
 
@@ -3632,1019 +3102,72 @@ def receive_message():
                 "status": "ok"
             })
 
-
-        # =====================================================
-        # MEDICATION MANAGEMENT
-        # =====================================================
-
-        if state == "MEDICATION_MANAGEMENT":
-
-            medication_id = session_data.get(
-                "medication_id"
-            )
-
-
-            if text == "✏️ تغییر ساعت مصرف":
-
-                start_change_times(
-
-                    chat_id,
-                    user_id,
-                    medication_id
-                )
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            if text == "🛑 پایان مصرف دارو":
-
-                medication = None
-
-
-                with get_db_connection() as conn:
-
-                    with conn.cursor() as cur:
-
-                        cur.execute("""
-                            SELECT
-                                name,
-                                is_active
-
-                            FROM medications
-
-                            WHERE id = %s
-
-                            AND user_id = %s;
-                        """, (
-                            medication_id,
-                            user_id
-                        ))
-
-                        medication = cur.fetchone()
-
-
-                if not medication:
-
-                    clear_session(
-                        user_id
-                    )
-
-                    send_message(
-                        chat_id,
-                        "❌ دارو پیدا نشد."
-                    )
-
-                    return jsonify({
-                        "status": "ok"
-                    })
-
-
-                medication_name = medication[0]
-
-
-                set_session(
-
-                    user_id,
-
-                    "CONFIRM_END_MEDICATION",
-
-                    {
-                        "medication_id":
-                            medication_id
-                    }
-                )
-
-
-                send_message(
-
-                    chat_id,
-
-                    f"⚠️ پایان مصرف «{medication_name}»\n\n"
-
-                    "مطمئنی مصرف این دارو دیگه "
-                    "ادامه نداره؟\n\n"
-
-                    "اگر تأیید کنی، از همین لحظه "
-                    "تمام Reminderهای این دارو متوقف "
-                    "می‌شن.",
-
-                    buttons=[
-
-                        ["✅ بله، پایان مصرف"],
-
-                        ["↩️ بازگشت"]
-                    ]
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            if text == "🟢 فعال کردن دوباره":
-
-                reactivate_medication(
-
-                    user_id,
-                    medication_id
-                )
-
-
-                clear_session(
-                    user_id
-                )
-
-
-                send_message(
-
-                    chat_id,
-
-                    "🟢 دارو دوباره فعال شد.\n\n"
-
-                    "از این به بعد Reminderهای "
-                    "آن دوباره فعال هستند. ⏰",
-
-                    buttons=[
-
-                        ["💊 داروهای من"],
-
-                        ["📊 داشبورد من"],
-
-                        ["↩️ منوی اصلی"]
-                    ]
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            if text == "🗑 حذف دارو":
-
-                set_session(
-
-                    user_id,
-
-                    "CONFIRM_DELETE",
-
-                    {
-                        "medication_id":
-                            medication_id
-                    }
-                )
-
-
-                send_message(
-
-                    chat_id,
-
-                    "⚠️ مطمئنی می‌خوای این دارو "
-                    "رو حذف کنی؟\n\n"
-
-                    "با حذف دارو، اطلاعات مربوط "
-                    "به نوبت‌های آن هم حذف می‌شود.",
-
-                    buttons=[
-
-                        ["✅ بله، حذف شود"],
-
-                        ["↩️ بازگشت"]
-                    ]
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            if text == "↩️ داروهای من":
-
-                clear_session(
-                    user_id
-                )
-
-
-                show_medications(
-                    chat_id,
-                    user_id
-                )
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-        # =====================================================
-        # CONFIRM END MEDICATION
-        # =====================================================
-
-        if state == "CONFIRM_END_MEDICATION":
-
-            medication_id = session_data.get(
-                "medication_id"
-            )
-
-
-            if text == "✅ بله، پایان مصرف":
-
-                medication = None
-
-
-                with get_db_connection() as conn:
-
-                    with conn.cursor() as cur:
-
-                        cur.execute("""
-                            SELECT name
-
-                            FROM medications
-
-                            WHERE id = %s
-
-                            AND user_id = %s;
-                        """, (
-                            medication_id,
-                            user_id
-                        ))
-
-                        medication = cur.fetchone()
-
-
-                if not medication:
-
-                    clear_session(
-                        user_id
-                    )
-
-                    send_message(
-                        chat_id,
-                        "❌ دارو پیدا نشد."
-                    )
-
-                    return jsonify({
-                        "status": "ok"
-                    })
-
-
-                medication_name = medication[0]
-
-
-                end_medication(
-
-                    user_id,
-                    medication_id
-                )
-
-
-                clear_session(
-                    user_id
-                )
-
-
-                send_message(
-
-                    chat_id,
-
-                    f"✅ مصرف «{medication_name}» "
-                    "به پایان رسید.\n\n"
-
-                    "از همین لحظه Reminderهای این "
-                    "دارو متوقف شدند. 🌱",
-
-                    buttons=[
-
-                        ["💊 داروهای من"],
-
-                        ["📊 داشبورد من"],
-
-                        ["↩️ منوی اصلی"]
-                    ]
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            if text == "↩️ بازگشت":
-
-                show_medication_management(
-
-                    chat_id,
-                    user_id,
-                    medication_id
-                )
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            send_message(
-
-                chat_id,
-
-                "لطفاً یکی از گزینه‌ها رو انتخاب کن.",
-
-                buttons=[
-
-                    ["✅ بله، پایان مصرف"],
-
-                    ["↩️ بازگشت"]
-                ]
-            )
-
-
-            return jsonify({
-                "status": "ok"
-            })
-
-
-        # =====================================================
-        # DELETE CONFIRM
-        # =====================================================
-
-        if state == "CONFIRM_DELETE":
-
-            medication_id = session_data.get(
-                "medication_id"
-            )
-
-
-            if text == "✅ بله، حذف شود":
-
-                delete_medication(
-
-                    user_id,
-                    medication_id
-                )
-
-
-                clear_session(
-                    user_id
-                )
-
-
-                send_message(
-
-                    chat_id,
-
-                    "🗑 دارو با موفقیت حذف شد.",
-
-                    buttons=[
-
-                        ["💊 داروهای من"],
-
-                        ["📊 داشبورد من"],
-
-                        ["↩️ منوی اصلی"]
-                    ]
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            if text == "↩️ بازگشت":
-
-                show_medication_management(
-
-                    chat_id,
-                    user_id,
-                    medication_id
-                )
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            send_message(
-
-                chat_id,
-
-                "لطفاً یکی از گزینه‌ها رو انتخاب کن.",
-
-                buttons=[
-
-                    ["✅ بله، حذف شود"],
-
-                    ["↩️ بازگشت"]
-                ]
-            )
-
-
-            return jsonify({
-                "status": "ok"
-            })
-
-
-        # =====================================================
-        # ASK MEDICATION NAME
-        # =====================================================
-
-        if state == "ASK_MEDICATION_NAME":
-
-            if not text:
-
-                send_message(
-                    chat_id,
-                    "لطفاً نام دارو رو وارد کن."
-                )
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            session_data = {
-                "medication_name": text
-            }
-
-
-            set_session(
-
-                user_id,
-
-                "ASK_TIMES_PER_DAY",
-
-                session_data
-            )
-
-
-            send_message(
-
-                chat_id,
-
-                f"💊 داروی «{text}»\n\n"
-
-                "این دارو رو روزی چند بار "
-                "مصرف می‌کنی؟",
-
-                buttons=[
-
-                    ["1️⃣ یک بار در روز"],
-
-                    ["🔢 چند بار در روز"],
-
-                    ["❌ لغو"]
-                ]
-            )
-
-
-            return jsonify({
-                "status": "ok"
-            })
-
-
-        # =====================================================
-        # ASK TIMES PER DAY
-        # =====================================================
-
-        if state == "ASK_TIMES_PER_DAY":
-
-            if text == "1️⃣ یک بار در روز":
-
-                session_data["times_per_day"] = 1
-                session_data["times"] = []
-
-
-                set_session(
-
-                    user_id,
-
-                    "ASK_TIME",
-
-                    session_data
-                )
-
-
-                send_message(
-
-                    chat_id,
-
-                    "⏰ ساعت مصرف رو وارد کن.\n\n"
-
-                    "مثلاً: 08:00"
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            if text == "🔢 چند بار در روز":
-
-                set_session(
-
-                    user_id,
-
-                    "ASK_NUMBER_OF_DOSES",
-
-                    session_data
-                )
-
-
-                send_message(
-
-                    chat_id,
-
-                    "🔢 دقیقاً چند بار در روز "
-                    "مصرف می‌کنی؟\n\n"
-
-                    "مثلاً: 2"
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            send_message(
-
-                chat_id,
-
-                "لطفاً یکی از گزینه‌ها رو انتخاب کن.",
-
-                buttons=[
-
-                    ["1️⃣ یک بار در روز"],
-
-                    ["🔢 چند بار در روز"],
-
-                    ["❌ لغو"]
-                ]
-            )
-
-
-            return jsonify({
-                "status": "ok"
-            })
-
-
-        # =====================================================
-        # NUMBER OF DOSES
-        # =====================================================
-
-        if state == "ASK_NUMBER_OF_DOSES":
-
-            try:
-
-                number = int(text)
-
-            except Exception:
-
-                number = 0
-
-
-            if number < 2 or number > 10:
-
-                send_message(
-
-                    chat_id,
-
-                    "لطفاً تعداد دفعات رو به صورت "
-                    "عدد بین ۲ تا ۱۰ وارد کن."
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            session_data[
-                "times_per_day"
-            ] = number
-
-
-            session_data[
-                "times"
-            ] = []
-
-
-            set_session(
-
-                user_id,
-
-                "ASK_TIME",
-
-                session_data
-            )
-
-
-            send_message(
-
-                chat_id,
-
-                "⏰ ساعت نوبت اول رو وارد کن.\n\n"
-
-                "مثلاً: 08:00"
-            )
-
-
-            return jsonify({
-                "status": "ok"
-            })
-
-
-        # =====================================================
-        # ASK TIME
-        # =====================================================
-
-        if state == "ASK_TIME":
-
-            time = text
-
-
-            if not is_valid_time(time):
-
-                send_message(
-
-                    chat_id,
-
-                    "⏰ فرمت ساعت درست نیست.\n\n"
-
-                    "مثلاً:\n"
-                    "08:00\n"
-                    "14:30"
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            times_per_day = session_data.get(
-                "times_per_day",
-                1
-            )
-
-
-            times = session_data.get(
-                "times",
-                []
-            )
-
-
-            if time in times:
-
-                send_message(
-
-                    chat_id,
-
-                    "⚠️ این ساعت رو قبلاً وارد کردی."
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            times.append(time)
-
-            session_data["times"] = times
-
-
-            if len(times) < times_per_day:
-
-                next_dose = len(times) + 1
-
-
-                set_session(
-
-                    user_id,
-
-                    "ASK_TIME",
-
-                    session_data
-                )
-
-
-                send_message(
-
-                    chat_id,
-
-                    f"⏰ ساعت نوبت "
-                    f"{next_dose} رو وارد کن.\n\n"
-
-                    "مثلاً: 20:00"
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            show_confirmation(
-
-                chat_id,
-                user_id,
-                session_data
-            )
-
-
-            return jsonify({
-                "status": "ok"
-            })
-
-
-        # =====================================================
-        # CONFIRM MEDICATION
-        # =====================================================
-
-        if state == "CONFIRM_MEDICATION":
-
-            if text == "✅ ثبت دارو":
-
-                save_medication(
-
-                    user_id,
-
-                    session_data[
-                        "medication_name"
-                    ],
-
-                    session_data[
-                        "times_per_day"
-                    ],
-
-                    session_data[
-                        "times"
-                    ]
-                )
-
-
-                clear_session(
-                    user_id
-                )
-
-
-                send_message(
-
-                    chat_id,
-
-                    "✅ دارو با موفقیت ثبت شد! 💚\n\n"
-
-                    "از این به بعد در ساعت‌های "
-                    "تعیین‌شده یادآوری مصرف دارو "
-                    "برات ارسال می‌کنم. ⏰",
-
-                    buttons=[
-
-                        ["📊 داشبورد من"],
-
-                        ["➕ افزودن دارو"],
-
-                        ["💊 داروهای من"],
-
-                        ["🔎 جستجوی دارو"]
-                    ]
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            if text == "🔄 اصلاح اطلاعات":
-
-                set_session(
-
-                    user_id,
-
-                    "ASK_MEDICATION_NAME",
-
-                    {}
-                )
-
-
-                send_message(
-
-                    chat_id,
-
-                    "🔄 باشه، دوباره شروع می‌کنیم.\n\n"
-
-                    "اسم دارو رو وارد کن:"
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-        # =====================================================
-        # EDIT TIMES
-        # =====================================================
-
-        if state == "EDIT_TIMES":
-
-            if text == "❌ لغو":
-
-                clear_session(
-                    user_id
-                )
-
-                main_menu(
-                    chat_id,
-                    db_user.get(
-                        "display_name"
-                    ) or "دوست من"
-                )
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            if not is_valid_time(text):
-
-                send_message(
-
-                    chat_id,
-
-                    "⏰ ساعت درست نیست.\n\n"
-
-                    "مثلاً 08:00"
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            times = session_data.get(
-                "times",
-                []
-            )
-
-
-            if text in times:
-
-                send_message(
-
-                    chat_id,
-
-                    "⚠️ این ساعت قبلاً وارد شده."
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            times.append(text)
-
-            session_data["times"] = times
-
-
-            required = session_data[
-                "times_per_day"
-            ]
-
-
-            if len(times) < required:
-
-                next_dose = len(times) + 1
-
-
-                set_session(
-
-                    user_id,
-
-                    "EDIT_TIMES",
-
-                    session_data
-                )
-
-
-                send_message(
-
-                    chat_id,
-
-                    f"⏰ ساعت نوبت "
-                    f"{next_dose} رو وارد کن."
-                )
-
-
-                return jsonify({
-                    "status": "ok"
-                })
-
-
-            save_changed_times(
-
-                user_id,
-
-                session_data[
-                    "medication_id"
-                ],
-
-                times
-            )
-
-
-            clear_session(
-                user_id
-            )
-
-
-            send_message(
-
-                chat_id,
-
-                "✅ ساعت‌های مصرف با موفقیت تغییر کردند.",
-
-                buttons=[
-
-                    ["💊 داروهای من"],
-
-                    ["📊 داشبورد من"],
-
-                    ["↩️ منوی اصلی"]
-                ]
-            )
-
-
-            return jsonify({
-                "status": "ok"
-            })
-
-
-        # =====================================================
+        # =================================================
         # FALLBACK
-        # =====================================================
+        # =================================================
 
         send_message(
-
             chat_id,
-
-            "متوجه نشدم 🙂\n\n"
-
-            "لطفاً از گزینه‌های موجود استفاده کن."
+            "متوجه درخواست شما نشدم.\n"
+            "لطفاً یکی از گزینه‌های منو را انتخاب کنید.",
+            MAIN_MENU_BUTTONS
         )
 
+        set_session(
+            user_id,
+            "MAIN_MENU"
+        )
+
+        return jsonify({
+            "status": "ok"
+        })
 
     except Exception as e:
 
         print(
-            "ERROR in message handler:",
+            "receive_message ERROR:",
             repr(e)
         )
 
-
-    return jsonify({
-        "status": "ok"
-    })
-
-
-# =========================================================
-# Home
-# =========================================================
-
-@app.route("/")
-def home():
-
-    return "Mahroo backend is running 🚀"
+        return jsonify({
+            "status": "ok"
+        })
 
 
 # =========================================================
-# Start
+# STARTUP
+# =========================================================
+
+try:
+
+    init_database()
+
+    print(
+        "Mahroo database initialized successfully."
+    )
+
+except Exception as e:
+
+    print(
+        "Database initialization error:",
+        repr(e)
+    )
+
+
+# =========================================================
+# RUN
 # =========================================================
 
 if __name__ == "__main__":
 
-    init_database()
-
-
     port = int(
-        os.environ.get(
+        os.getenv(
             "PORT",
-            5000
+            "5000"
         )
     )
 
-
     app.run(
-
         host="0.0.0.0",
-
         port=port
     )
