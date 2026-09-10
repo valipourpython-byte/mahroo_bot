@@ -2566,40 +2566,40 @@ def receive_message():
         # =================================================
 
         # =================================================
-# START / MAIN MENU
-# =================================================
-#
-# IMPORTANT:
-# This MUST be before reading the user's session.
-#
-# Therefore /start works regardless of the current
-# state of the user.
-# =================================================
-
-normalized_text = (
-    text.strip().lower()
-)
-
-if normalized_text in [
-    "/start",
-    "start",
-    "شروع",
-    "استارت",
-    "↩️ منوی اصلی"
-]:
-
-    print(
-        "START BUTTON/COMMAND RECEIVED"
-    )
-
-    start_conversation(
-        chat_id,
-        user_id
-    )
-
-    return jsonify({
-        "status": "ok"
-    })
+        # START / MAIN MENU
+        # =================================================
+        #
+        # IMPORTANT:
+        # This MUST be before reading the user's session.
+        #
+        # Therefore /start works regardless of the current
+        # state of the user.
+        # =================================================
+        
+        normalized_text = (
+            text.strip().lower()
+        )
+        
+        if normalized_text in [
+            "/start",
+            "start",
+            "شروع",
+            "استارت",
+            "↩️ منوی اصلی"
+        ]:
+        
+            print(
+                "START BUTTON/COMMAND RECEIVED"
+            )
+        
+            start_conversation(
+                chat_id,
+                user_id
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
 
         # =================================================
         # GET SESSION
