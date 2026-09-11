@@ -2969,81 +2969,146 @@ def receive_message():
             flush=True
         )
 
+        
         # =================================================
         # CHAT ID
         # =================================================
-
+        
+        print(
+            "STEP 9: Finding chat_id...",
+            flush=True
+        )
+        
         chat_id = (
-
+        
             chat.get("id")
-
+        
             or message.get(
                 "chat_id"
             )
-
+        
             or user.get(
                 "chat_id"
             )
-
+        
             or user.get("id")
-
+        
         )
-
+        
+        print(
+            "STEP 10: chat_id found:",
+            repr(chat_id),
+            flush=True
+        )
+        
         if chat_id is None:
-
+        
             print(
-                "ERROR: chat_id not found"
+                "ERROR: chat_id not found",
+                flush=True
             )
-
+        
             return jsonify({
                 "status": "ok"
             })
-
+        
         chat_id = str(
             chat_id
         )
-
+        
+        print(
+            "STEP 11: chat_id converted:",
+            repr(chat_id),
+            flush=True
+        )
+        
         # =================================================
         # USER
         # =================================================
-
-        user_id = get_or_create_user({
-
-            "id":
-
-                user.get("id")
-
-                or user.get("user_id")
-
-                or chat_id,
-
-            "chat_id":
-
-                chat_id,
-
-            "first_name":
-
-                user.get(
-                    "first_name",
-                    ""
-                ),
-
-            "name":
-
-                user.get(
-                    "name",
-                    ""
-                ),
-
-            "username":
-
-                user.get(
-                    "username",
-                    ""
-                )
-
-        })
-
+        
+        print(
+            "STEP 12: Calling get_or_create_user...",
+            flush=True
+        )
+        
+        try:
+        
+            user_id = get_or_create_user({
+        
+                "id":
+        
+                    user.get("id")
+        
+                    or user.get("user_id")
+        
+                    or chat_id,
+        
+                "chat_id":
+        
+                    chat_id,
+        
+                "first_name":
+        
+                    user.get(
+                        "first_name",
+                        ""
+                    ),
+        
+                "name":
+        
+                    user.get(
+                        "name",
+                        ""
+                    ),
+        
+                "username":
+        
+                    user.get(
+                        "username",
+                        ""
+                    )
+        
+            })
+        
+            print(
+                "STEP 13: get_or_create_user OK",
+                flush=True
+            )
+        
+            print(
+                "USER ID:",
+                repr(user_id),
+                flush=True
+            )
+        
+        except Exception as e:
+        
+            print(
+                "========== GET USER ERROR ==========",
+                flush=True
+            )
+        
+            print(
+                "Error type:",
+                type(e).__name__,
+                flush=True
+            )
+        
+            print(
+                "Error:",
+                repr(e),
+                flush=True
+            )
+        
+            print(
+                "====================================",
+                flush=True
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
+        
         # =================================================
         # REMINDER BUTTONS
         # =================================================
