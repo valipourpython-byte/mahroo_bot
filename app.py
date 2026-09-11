@@ -3481,41 +3481,87 @@ def receive_message():
         # AI DRUG QUESTION STATE
         # =================================================
 
-        
+         # =================================================
+# AI DRUG QUESTION STATE
+# =================================================
 
-        if state == "ASK_DRUG_QUESTION":
-        
-            if not text:
-        
-                send_message(
-                    chat_id,
-                    "💬 لطفاً سؤال دارویی خود را بنویسید.",
-                    MAIN_MENU_BUTTONS
-                )
-        
-                return jsonify({
-                    "status": "ok"
-                })
-        
-            print(
-                "========================================"
-            )
-            print(
-                "AI QUESTION RECEIVED"
-            )
-            print(
-                "Question:",
-                repr(text)
-            )
-            print(
-                "User ID:",
-                user_id
-            )
-            print(
-                "========================================"
-            )
-        
-            try:
+print(
+    "========== BEFORE AI STATE CHECK ==========",
+    flush=True
+)
+
+print(
+    "STATE BEFORE AI CHECK:",
+    repr(state),
+    flush=True
+)
+
+print(
+    "STATE TYPE:",
+    type(state).__name__,
+    flush=True
+)
+
+if state == "ASK_DRUG_QUESTION":
+
+    print(
+        "========== AI STATE MATCHED ==========",
+        flush=True
+    )
+
+    print(
+        "STATE:",
+        repr(state),
+        flush=True
+    )
+
+    print(
+        "TEXT:",
+        repr(text),
+        flush=True
+    )
+
+    if not text:
+
+        send_message(
+            chat_id,
+            "💬 لطفاً سؤال دارویی خود را بنویسید.",
+            MAIN_MENU_BUTTONS
+        )
+
+        return jsonify({
+            "status": "ok"
+        })
+
+    print(
+        "========================================",
+        flush=True
+    )
+
+    print(
+        "AI QUESTION RECEIVED",
+        flush=True
+    )
+
+    print(
+        "Question:",
+        repr(text),
+        flush=True
+    )
+
+    print(
+        "User ID:",
+        user_id,
+        flush=True
+    )
+
+    print(
+        "========================================",
+        flush=True
+    )
+
+    try:
+
         
                 # -------------------------------------------------
                 # STEP 1: FIND DRUGS
