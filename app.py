@@ -2911,13 +2911,62 @@ def receive_message():
 
             text = str(text)
 
-        text = clean_drug_text(
-            text
+        print(
+            "STEP 7: Raw text:",
+            repr(text),
+            flush=True
         )
-
+        
+        try:
+        
+            text = clean_drug_text(
+                text
+            )
+        
+            print(
+                "STEP 8: Cleaned text:",
+                repr(text),
+                flush=True
+            )
+        
+        except Exception as e:
+        
+            print(
+                "========== CLEAN TEXT ERROR ==========",
+                flush=True
+            )
+        
+            print(
+                "Error type:",
+                type(e).__name__,
+                flush=True
+            )
+        
+            print(
+                "Error:",
+                repr(e),
+                flush=True
+            )
+        
+            print(
+                "Original text:",
+                repr(text),
+                flush=True
+            )
+        
+            print(
+                "=======================================",
+                flush=True
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
+        
         print(
             "Incoming text:",
-            repr(text)
+            repr(text),
+            flush=True
         )
 
         # =================================================
