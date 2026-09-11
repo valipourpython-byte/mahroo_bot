@@ -1366,42 +1366,132 @@ def find_drugs_in_question(question):
     if not question:
         return []
 
+    # Common Persian drug names -> English generic names
+    drug_aliases = {
+        "پاراستامول": "acetaminophen",
+        "استامینوفن": "acetaminophen",
+        "ایبوپروفن": "ibuprofen",
+        "ناپروکسن": "naproxen",
+        "دیکلوفناک": "diclofenac",
+        "آسپرین": "aspirin",
+        "وارفارین": "warfarin",
+        "متفورمین": "metformin",
+        "آموکسی سیلین": "amoxicillin",
+        "آموکسی‌سیلین": "amoxicillin",
+        "آزیترومایسین": "azithromycin",
+        "سفیکسیم": "cefixime",
+        "سفالکسین": "cephalexin",
+        "لوراتادین": "loratadine",
+        "سیتریزین": "cetirizine",
+        "فاموتیدین": "famotidine",
+        "امپرازول": "omeprazole",
+        "امپرازول": "omeprazole",
+        "پنتوپرازول": "pantoprazole",
+        "آتورواستاتین": "atorvastatin",
+        "لوواستاتین": "lovastatin",
+        "آملودیپین": "amlodipine",
+        "لوزارتان": "losartan",
+        "والسارتان": "valsartan",
+        "انالاپریل": "enalapril",
+        "سرترالین": "sertraline",
+        "فلوکستین": "fluoxetine",
+        "کلونازپام": "clonazepam",
+        "دیازپام": "diazepam",
+        "گاباپنتین": "gabapentin",
+        "پردنیزولون": "prednisolone",
+        "دگزامتازون": "dexamethasone"
+    }
+
+    detected_names = []
+
+    # Find Persian drug names inside the user's question
+    for persian_name, english_name in drug_aliases.items():
+
+        if persian_name in question:
+            detected_names.append(
+                english_name
+            )
+
+    # Also support direct English drug names
+    question_lower = question.lower()
+
+    common_english_names = set(
+        drug_aliases.values()
+    )
+
+    for english_name in common_english_names:
+
+        if english_name.lower() in question_lower:
+            detected_names.append(
+                english_name
+            )
+
+    # Remove duplicates while preserving order
+    detected_names = list(
+        dict.fromkeys(
+            detected_names
+        )
+    )
+
+    print(
+        "Detected drug names:",
+        detected_names,
+        flush=True
+    )
+
+    if not detected_names:
+        return []
+
     found_drugs = []
 
     with get_db_connection() as conn:
 
         with conn.cursor() as cur:
 
-            cur.execute(
-                """
-                SELECT
-                    generic_rxcui,
-                    generic_tty,
-                    generic_name
-                FROM drugs
-                WHERE POSITION(
-                    LOWER(generic_name)
-                    IN LOWER(%s)
-                ) > 0
-                ORDER BY
-                    LENGTH(generic_name) DESC
-                LIMIT 3;
-                """,
-                (question,)
-            )
+            for drug_name in detected_names:
 
-            rows = cur.fetchall()
-
-            for row in rows:
-
-                drug = search_drug_database(
-                    row[2]
+                print(
+                    "Searching database for:",
+                    drug_name,
+                    flush=True
                 )
 
-                if drug:
-                    found_drugs.append(
-                        drug
+                cur.execute(
+                    """
+                    SELECT
+                        generic_rxcui,
+                        generic_tty,
+                        generic_name
+                    FROM drugs
+                    WHERE LOWER(generic_name)
+                          LIKE LOWER(%s)
+                    ORDER BY
+                        LENGTH(generic_name) ASC
+                    LIMIT 5;
+                    """,
+                    (
+                        drug_name + "%",
                     )
+                )
+
+                rows = cur.fetchall()
+
+                print(
+                    "Database matches:",
+                    len(rows),
+                    flush=True
+                )
+
+                for row in rows:
+
+                    drug = search_drug_database(
+                        row[2]
+                    )
+
+                    if drug:
+                        found_drugs.append(
+                            drug
+                        )
 
     return found_drugs
 
