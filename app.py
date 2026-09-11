@@ -2755,6 +2755,10 @@ def home():
 def receive_message():
 
     try:
+        print(
+            "========== MESSAGE ROUTE ENTERED ==========",
+            flush=True
+        )
 
         # =================================================
         # READ BALE UPDATE
