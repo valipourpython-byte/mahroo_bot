@@ -423,7 +423,8 @@ def ask_llm(
     if not OPENROUTER_API_KEY:
 
         print(
-            "ERROR: OPENROUTER_API_KEY is not configured."
+            "ERROR: OPENROUTER_API_KEY is not configured.",
+            flush=True
         )
 
         return None
@@ -431,50 +432,43 @@ def ask_llm(
     system_prompt = """
 تو دستیار هوشمند دارویی «مهرو» هستی.
 
-وظیفه تو پاسخ‌گویی فارسی به پرسش‌های کاربران درباره داروها
-و اطلاعات دارویی است.
+وظیفه تو پاسخ‌گویی کوتاه، واضح و فارسی به پرسش‌های
+کاربران درباره داروها است.
 
-قوانین مهم:
+قوانین:
 
-1. فقط در حوزه اطلاعات دارویی پاسخ بده.
+1. فقط درباره اطلاعات دارویی پاسخ بده.
 
-2. اگر سؤال کاربر ارتباطی با دارو، مصرف دارو، عوارض،
-موارد مصرف، تداخلات، هشدارها، منع مصرف، شکل دارویی
-یا اطلاعات مرتبط با دارو ندارد، پاسخ بده:
+2. اطلاعات موجود در CONTEXT منبع اصلی پاسخ است.
 
-«این سؤال در حوزه اطلاعات دارویی مهرو نیست.»
+3. فقط از اطلاعات موجود در CONTEXT استفاده کن.
+اطلاعات دارویی جدید از خودت اضافه نکن.
 
-3. اطلاعاتی که در CONTEXT ارائه شده را منبع اصلی اطلاعات
-دارویی در نظر بگیر.
+4. اگر اطلاعات کافی در CONTEXT وجود ندارد، بگو:
+«اطلاعات کافی درباره این دارو در پایگاه داده مهرو موجود نیست.»
 
-4. اطلاعاتی را که در CONTEXT وجود ندارد، به عنوان واقعیت
-قطعی درباره داروی موردنظر اختراع نکن.
+5. پاسخ را برای یک کاربر عادی و به زبان فارسی بنویس.
 
-5. اگر اطلاعات کافی در CONTEXT وجود ندارد، صریحاً بگو
-که اطلاعات کافی در پایگاه داده دارویی مهرو موجود نیست.
+6. نام انگلیسی دارو را در صورت مفید بودن داخل پرانتز بیاور.
 
-6. پاسخ را به زبان فارسی و برای یک کاربر عادی بنویس.
+7. پاسخ کوتاه و مستقیم باشد.
 
-7. نام انگلیسی دارو را در صورت مفید بودن داخل پرانتز بیاور.
+8. اگر سؤال درباره موارد مصرف دارو است، فقط موارد مصرف
+موجود در CONTEXT را به صورت خلاصه بیان کن.
 
-8. پاسخ کوتاه، واضح و قابل فهم باشد.
+9. اگر سؤال درباره عوارض، تداخلات، هشدارها یا منع مصرف است،
+فقط اطلاعات مربوط به همان بخش را از CONTEXT استخراج کن.
 
-9. از ارائه تشخیص پزشکی قطعی خودداری کن.
+10. برای دوز شخصی، شروع، قطع یا تغییر مقدار مصرف دارو،
+توصیه قطعی و شخصی‌سازی‌شده نده و کاربر را به پزشک
+یا داروساز ارجاع بده.
 
-10. در مسائل پزشکی حساس، از دادن دستور قطعی و
-شخصی‌سازی‌شده برای تغییر، قطع یا شروع دارو خودداری کن
-و کاربر را به پزشک یا داروساز ارجاع بده.
+11. تشخیص پزشکی قطعی ارائه نکن.
 
-11. اگر کاربر درباره دوز شخصی، تغییر دوز، قطع دارو،
-شروع دارو یا جایگزین کردن دارو سؤال کرد، با احتیاط پاسخ بده
-و توصیه به مشورت با پزشک یا داروساز کن.
-
-12. اگر چند دارو در سؤال مطرح شده‌اند، تا حد امکان
-اطلاعات مربوط به هر دارو را جداگانه بیان کن.
-
-13. اطلاعات CONTEXT را خلاصه، منظم و قابل فهم ارائه کن.
-
-14. از ساختن اطلاعاتی که در CONTEXT وجود ندارد خودداری کن.
+12. بسیار مهم:
+پاسخ نهایی را مستقیماً در بخش content قرار بده.
+نیازی به توضیح مراحل فکر کردن، reasoning یا تحلیل سؤال نیست.
+فقط پاسخ نهایی کاربر را تولید کن.
 """
 
     user_prompt = f"""
@@ -482,140 +476,184 @@ def ask_llm(
 
 {user_question}
 
---------------------------------
+==============================
 
-اطلاعات بازیابی‌شده از پایگاه داده دارویی مهرو:
+CONTEXT دارویی مهرو:
 
-{
-    drug_context
-    if drug_context
-    else
-    "اطلاعات دارویی مشخصی برای این سؤال پیدا نشد."
-}
+{drug_context if drug_context else "اطلاعات دارویی مشخصی برای این سؤال پیدا نشد."}
+
+==============================
+
+اکنون فقط پاسخ نهایی فارسی را بنویس.
+پاسخ باید کوتاه، مستقیم و بر اساس CONTEXT باشد.
 """
 
     payload = {
-
-        "model":
-            OPENROUTER_MODEL,
+        "model": OPENROUTER_MODEL,
 
         "messages": [
-
             {
-                "role":
-                    "system",
-
-                "content":
-                    system_prompt
+                "role": "system",
+                "content": system_prompt
             },
-
             {
-                "role":
-                    "user",
-
-                "content":
-                    user_prompt
+                "role": "user",
+                "content": user_prompt
             }
         ],
 
-        "temperature":
-            0.2,
+        "temperature": 0.1,
 
-        "max_tokens":
-            500
+        "max_tokens": 800,
+
+        "reasoning": {
+            "enabled": False
+        }
     }
 
     headers = {
-
-        "Authorization":
-            f"Bearer {OPENROUTER_API_KEY}",
-
-        "Content-Type":
-            "application/json",
-
-        "HTTP-Referer":
-            "https://htvsai.app",
-
-        "X-Title":
-            "Mahroo"
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://htvsai.app",
+        "X-Title": "Mahroo"
     }
+
     try:
 
-        print("========== ASK_LLM CALLED ==========")
-        print("Question:", repr(user_question))
-        print("Model:", OPENROUTER_MODEL)
-        print("API KEY EXISTS:", bool(OPENROUTER_API_KEY))
-        print("Context length:", len(drug_context or ""))
-        print("====================================")
-    
+        print(
+            "========== ASK_LLM CALLED ==========",
+            flush=True
+        )
+
+        print(
+            "Question:",
+            repr(user_question),
+            flush=True
+        )
+
+        print(
+            "Model:",
+            OPENROUTER_MODEL,
+            flush=True
+        )
+
+        print(
+            "API KEY EXISTS:",
+            bool(OPENROUTER_API_KEY),
+            flush=True
+        )
+
+        print(
+            "Context length:",
+            len(drug_context or ""),
+            flush=True
+        )
+
+        print(
+            "====================================",
+            flush=True
+        )
+
         response = requests.post(
-    
             "https://openrouter.ai/api/v1/chat/completions",
-    
             headers=headers,
-    
             json=payload,
-    
             timeout=60
         )
-    
+
         print(
-            "========== OPENROUTER RESPONSE =========="
+            "========== OPENROUTER RESPONSE ==========",
+            flush=True
         )
-        print("Status code:", response.status_code)
-        print("Response:", response.text[:3000])
+
         print(
-            "=========================================="
+            "Status code:",
+            response.status_code,
+            flush=True
         )
-    
+
+        print(
+            "Response:",
+            response.text[:5000],
+            flush=True
+        )
+
+        print(
+            "==========================================",
+            flush=True
+        )
+
         if not response.ok:
-    
+
             print(
                 "OpenRouter error:",
                 response.status_code,
-                response.text
+                response.text,
+                flush=True
             )
-    
+
             return None
-    
+
         data = response.json()
-    
+
         choices = data.get(
             "choices",
             []
         )
-    
+
         if not choices:
-    
+
             print(
-                "OpenRouter returned no choices"
+                "OpenRouter returned no choices",
+                flush=True
             )
-    
+
             return None
-    
-        answer = (
-            choices[0]
-            .get("message", {})
-            .get("content")
+
+        message = choices[0].get(
+            "message",
+            {}
         )
-    
+
+        answer = message.get(
+            "content"
+        )
+
+        finish_reason = choices[0].get(
+            "finish_reason"
+        )
+
+        print(
+            "Finish reason:",
+            finish_reason,
+            flush=True
+        )
+
+        print(
+            "Answer exists:",
+            bool(answer),
+            flush=True
+        )
+
         if not answer:
-    
+
             print(
-                "OpenRouter returned empty answer"
+                "OpenRouter returned empty final answer.",
+                flush=True
             )
-    
+
             return None
-    
+
         return answer.strip()
-    
+
     except Exception as e:
-    
+
         print(
             "OpenRouter exception:",
-            repr(e)
+            repr(e),
+            flush=True
         )
-    
+
         return None
     
 
