@@ -3212,25 +3212,101 @@ def receive_message():
                 "status": "ok"
             })
 
+        
         # =================================================
         # GET SESSION
         # =================================================
-
-        state, session_data = (
-
-            get_session(
-                user_id
-            )
-
+        
+        print(
+            "STEP 14: Calling get_session...",
+            flush=True
         )
-        print("========== MESSAGE DEBUG ==========")
-        print("USER ID:", repr(user_id))
-        print("TEXT:", repr(text))
-        print("STATE:", repr(state))
-        print("SESSION DATA:", repr(session_data))
-        print("===================================")
+        
+        try:
+        
+            state, session_data = (
+        
+                get_session(
+                    user_id
+                )
+        
+            )
+        
+            print(
+                "STEP 15: get_session OK",
+                flush=True
+            )
+        
+            print(
+                "========== MESSAGE DEBUG ==========",
+                flush=True
+            )
+        
+            print(
+                "USER ID:",
+                repr(user_id),
+                flush=True
+            )
+        
+            print(
+                "TEXT:",
+                repr(text),
+                flush=True
+            )
+        
+            print(
+                "STATE:",
+                repr(state),
+                flush=True
+            )
+        
+            print(
+                "SESSION DATA:",
+                repr(session_data),
+                flush=True
+            )
+        
+            print(
+                "===================================",
+                flush=True
+            )
+        
+        except Exception as e:
+        
+            print(
+                "========== GET SESSION ERROR ==========",
+                flush=True
+            )
+        
+            print(
+                "Error type:",
+                type(e).__name__,
+                flush=True
+            )
+        
+            print(
+                "Error:",
+                repr(e),
+                flush=True
+            )
+        
+            print(
+                "User ID:",
+                repr(user_id),
+                flush=True
+            )
+        
+            print(
+                "=======================================",
+                flush=True
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
+        
         if not state:
-
+        
             state = "MAIN_MENU"
 
         # =================================================
