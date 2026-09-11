@@ -1359,17 +1359,11 @@ def drug_to_context(
 # =========================================================
 # FIND DRUGS IN USER QUESTION
 # =========================================================
+def find_drugs_in_question(question):
 
-def find_drugs_in_question(
-    question
-):
-
-    question = clean_drug_text(
-        question
-    )
+    question = clean_drug_text(question)
 
     if not question:
-
         return []
 
     found_drugs = []
@@ -1378,22 +1372,23 @@ def find_drugs_in_question(
 
         with conn.cursor() as cur:
 
-            cur.execute("""
+            cur.execute(
+                """
                 SELECT
                     generic_rxcui,
                     generic_tty,
                     generic_name
                 FROM drugs
-                WHERE LOWER(%s)
-                      LIKE '%' ||
-                      LOWER(generic_name) ||
-                      '%'
+                WHERE POSITION(
+                    LOWER(generic_name)
+                    IN LOWER(%s)
+                ) > 0
                 ORDER BY
                     LENGTH(generic_name) DESC
                 LIMIT 3;
-            """, (
-                question,
-            ))
+                """,
+                (question,)
+            )
 
             rows = cur.fetchall()
 
@@ -1404,7 +1399,6 @@ def find_drugs_in_question(
                 )
 
                 if drug:
-
                     found_drugs.append(
                         drug
                     )
