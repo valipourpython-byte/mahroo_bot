@@ -2747,6 +2747,9 @@ def home():
 # =========================================================
 # RECEIVE MESSAGE
 # =========================================================
+# =========================================================
+# RECEIVE MESSAGE
+# =========================================================
 
 @app.route(
     "/message",
@@ -2755,6 +2758,7 @@ def home():
 def receive_message():
 
     try:
+
         print(
             "========== MESSAGE ROUTE ENTERED ==========",
             flush=True
@@ -2764,27 +2768,59 @@ def receive_message():
         # READ BALE UPDATE
         # =================================================
 
-        data = request.get_json(
-            silent=True
-        ) or {}
-
         print(
-
-            "Incoming Bale message:",
-
-            json.dumps(
-
-                data,
-
-                ensure_ascii=False
-
-            )
-
+            "STEP 1: Reading raw request...",
+            flush=True
         )
 
-        # -------------------------------------------------
+        raw_data = request.get_data(
+            as_text=True
+        )
+
+        print(
+            "RAW REQUEST DATA:",
+            repr(raw_data),
+            flush=True
+        )
+
+        # =================================================
+        # PARSE JSON
+        # =================================================
+
+        print(
+            "STEP 2: Parsing JSON...",
+            flush=True
+        )
+
+        data = request.get_json(
+            silent=True
+        )
+
+        print(
+            "PARSED JSON:",
+            repr(data),
+            flush=True
+        )
+
+        if not data:
+
+            print(
+                "ERROR: No JSON received",
+                flush=True
+            )
+
+            return jsonify({
+                "status": "ok"
+            })
+
+        print(
+            "STEP 3: JSON received successfully",
+            flush=True
+        )
+
+        # =================================================
         # Bale payload
-        # -------------------------------------------------
+        # =================================================
 
         message = (
 
@@ -2796,14 +2832,29 @@ def receive_message():
 
         )
 
+        print(
+            "STEP 4: Message object:",
+            repr(message),
+            flush=True
+        )
+
         if not isinstance(
             message,
             dict
         ):
 
+            print(
+                "ERROR: Message is not a dictionary",
+                flush=True
+            )
+
             return jsonify({
                 "status": "ok"
             })
+
+        # =================================================
+        # USER
+        # =================================================
 
         user = (
 
@@ -2815,12 +2866,28 @@ def receive_message():
 
         )
 
+        print(
+            "STEP 5: User:",
+            repr(user),
+            flush=True
+        )
+
+        # =================================================
+        # CHAT
+        # =================================================
+
         chat = (
 
             message.get("chat")
 
             or {}
 
+        )
+
+        print(
+            "STEP 6: Chat:",
+            repr(chat),
+            flush=True
         )
 
         # =================================================
