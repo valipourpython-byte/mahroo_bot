@@ -3478,6 +3478,7 @@ def receive_message():
             })
 
        
+        
         # =================================================
         # AI DRUG QUESTION STATE
         # =================================================
@@ -3558,14 +3559,14 @@ def receive_message():
             )
         
             try:
-
         
                 # -------------------------------------------------
                 # STEP 1: FIND DRUGS
                 # -------------------------------------------------
         
                 print(
-                    "AI STEP 1: Finding drugs..."
+                    "AI STEP 1: Finding drugs...",
+                    flush=True
                 )
         
                 drugs = find_drugs_in_question(
@@ -3573,7 +3574,8 @@ def receive_message():
                 )
         
                 print(
-                    "AI STEP 1 OK"
+                    "AI STEP 1 OK",
+                    flush=True
                 )
         
                 print(
@@ -3581,7 +3583,8 @@ def receive_message():
                     [
                         d.get("generic_name")
                         for d in drugs
-                    ]
+                    ],
+                    flush=True
                 )
         
                 # -------------------------------------------------
@@ -3589,7 +3592,8 @@ def receive_message():
                 # -------------------------------------------------
         
                 print(
-                    "AI STEP 2: Building drug context..."
+                    "AI STEP 2: Building drug context...",
+                    flush=True
                 )
         
                 contexts = []
@@ -3598,7 +3602,8 @@ def receive_message():
         
                     print(
                         "Building context for:",
-                        drug.get("generic_name")
+                        drug.get("generic_name"),
+                        flush=True
                     )
         
                     context = drug_to_context(
@@ -3620,12 +3625,14 @@ def receive_message():
                 )
         
                 print(
-                    "AI STEP 2 OK"
+                    "AI STEP 2 OK",
+                    flush=True
                 )
         
                 print(
                     "Drug context length:",
-                    len(drug_context)
+                    len(drug_context),
+                    flush=True
                 )
         
                 # -------------------------------------------------
@@ -3633,7 +3640,8 @@ def receive_message():
                 # -------------------------------------------------
         
                 print(
-                    "AI STEP 3: Calling OpenRouter..."
+                    "AI STEP 3: Calling OpenRouter...",
+                    flush=True
                 )
         
                 answer = ask_llm(
@@ -3642,7 +3650,8 @@ def receive_message():
                 )
         
                 print(
-                    "AI STEP 3 COMPLETED"
+                    "AI STEP 3 COMPLETED",
+                    flush=True
                 )
         
                 # -------------------------------------------------
@@ -3652,27 +3661,21 @@ def receive_message():
                 if not answer:
         
                     print(
-                        "AI ERROR: ask_llm returned None/empty"
+                        "AI ERROR: ask_llm returned None/empty",
+                        flush=True
                     )
         
                     send_message(
-        
                         chat_id,
-        
                         "❌ متأسفانه در دریافت پاسخ "
                         "از دستیار هوشمند مشکلی پیش آمد.\n\n"
                         "لطفاً چند لحظه بعد دوباره تلاش کنید.",
-        
                         MAIN_MENU_BUTTONS
-        
                     )
         
                     set_session(
-        
                         user_id,
-        
                         "ASK_DRUG_QUESTION"
-        
                     )
         
                     return jsonify({
@@ -3684,7 +3687,8 @@ def receive_message():
                 # -------------------------------------------------
         
                 print(
-                    "AI STEP 4: Sending answer..."
+                    "AI STEP 4: Sending answer...",
+                    flush=True
                 )
         
                 answer_text = (
@@ -3693,17 +3697,14 @@ def receive_message():
                 )
         
                 send_message(
-        
                     chat_id,
-        
                     answer_text,
-        
                     MAIN_MENU_BUTTONS
-        
                 )
         
                 print(
-                    "AI STEP 4 OK"
+                    "AI STEP 4 OK",
+                    flush=True
                 )
         
                 # -------------------------------------------------
@@ -3711,11 +3712,8 @@ def receive_message():
                 # -------------------------------------------------
         
                 set_session(
-        
                     user_id,
-        
                     "ASK_DRUG_QUESTION"
-        
                 )
         
                 return jsonify({
@@ -3725,54 +3723,57 @@ def receive_message():
             except Exception as e:
         
                 print(
-                    "========================================"
+                    "========================================",
+                    flush=True
                 )
         
                 print(
-                    "AI DRUG QUESTION ERROR"
+                    "AI DRUG QUESTION ERROR",
+                    flush=True
                 )
         
                 print(
                     "Error type:",
-                    type(e).__name__
+                    type(e).__name__,
+                    flush=True
                 )
         
                 print(
                     "Error:",
-                    repr(e)
+                    repr(e),
+                    flush=True
                 )
         
                 print(
                     "Question:",
-                    repr(text)
+                    repr(text),
+                    flush=True
                 )
         
                 print(
-                    "========================================"
+                    "========================================",
+                    flush=True
                 )
         
                 send_message(
-        
                     chat_id,
-        
                     "❌ هنگام پردازش سؤال مشکلی رخ داد.\n\n"
                     "لطفاً دوباره سؤال خود را ارسال کنید.",
-        
                     MAIN_MENU_BUTTONS
-        
                 )
         
                 set_session(
-        
                     user_id,
-        
                     "ASK_DRUG_QUESTION"
-        
                 )
         
                 return jsonify({
                     "status": "ok"
                 })
+
+# =================================================
+# DRUG SEARCH STATE
+# =================================================
         # =================================================
         # DRUG SEARCH STATE
         # =================================================
