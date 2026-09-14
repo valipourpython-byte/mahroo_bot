@@ -5675,6 +5675,7 @@ def receive_message():
                 )
         
         
+        
         # =================================================
         # CONFIRM MEDICATION
         # =================================================
@@ -5702,8 +5703,14 @@ def receive_message():
                     times=session_data[
                         "times"
                     ],
-                    start_date=session_data["start_date"],
-                    end_date=session_data["end_date"]
+
+                    start_date=session_data[
+                        "start_date"
+                    ],
+
+                    end_date=session_data[
+                        "end_date"
+                    ]
 
                 )
 
@@ -5711,7 +5718,10 @@ def receive_message():
 
                     chat_id,
 
-                    "✅ دارو با موفقیت ثبت شد.",
+                    "✅ دارو با موفقیت ثبت شد.\n\n"
+                    "از این به بعد یادآوری‌های دارو فقط "
+                    "در بازه تاریخ شروع تا تاریخ پایان "
+                    "ارسال می‌شوند.",
 
                     MAIN_MENU_BUTTONS
 
@@ -5728,6 +5738,8 @@ def receive_message():
                 return jsonify({
                     "status": "ok"
                 })
+
+
 
         # =================================================
         # EDIT TIMES
