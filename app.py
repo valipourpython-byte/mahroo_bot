@@ -4780,7 +4780,162 @@ def receive_message():
                 return jsonify({
                     "status": "ok"
                 })
+
+
+
+        # =================================================
+        # ASK START DATE
+        # =================================================
         
+        if state == "ASK_START_DATE":
+        
+            start_date = parse_jalali_date(text)
+        
+            if start_date is None:
+        
+                send_message(
+                    chat_id,
+                    "❌ تاریخ واردشده معتبر نیست.\n\n"
+                    "لطفاً تاریخ را به فرمت زیر وارد کنید:\n"
+                    "YYYY/MM/DD\n\n"
+                    "مثلاً: 1405/06/20",
+                    MAIN_MENU_BUTTONS
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            session_data[
+                "start_date"
+            ] = start_date
+        
+            set_session(
+                user_id,
+                "ASK_END_DATE",
+                session_data
+            )
+        
+            send_message(
+                chat_id,
+                "📅 تاریخ پایان مصرف دارو را وارد کنید.\n\n"
+                "لطفاً تاریخ را به صورت زیر وارد کنید:\n"
+                "YYYY/MM/DD\n\n"
+                "مثلاً: 1405/07/20",
+                MAIN_MENU_BUTTONS
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
+
+        # =================================================
+        # ASK END DATE
+        # =================================================
+        
+        if state == "ASK_END_DATE":
+        
+            end_date = parse_jalali_date(text)
+        
+            if end_date is None:
+        
+                send_message(
+                    chat_id,
+                    "❌ تاریخ واردشده معتبر نیست.\n\n"
+                    "لطفاً تاریخ را به فرمت زیر وارد کنید:\n"
+                    "YYYY/MM/DD\n\n"
+                    "مثلاً: 1405/07/20",
+                    MAIN_MENU_BUTTONS
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            start_date = session_data.get(
+                "start_date"
+            )
+        
+            if start_date is None:
+        
+                send_message(
+                    chat_id,
+                    "❌ تاریخ شروع مصرف ثبت نشده است.\n"
+                    "لطفاً دوباره تاریخ شروع را وارد کنید.",
+                    MAIN_MENU_BUTTONS
+                )
+        
+                set_session(
+                    user_id,
+                    "ASK_START_DATE",
+                    session_data
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            if end_date < start_date:
+        
+                send_message(
+                    chat_id,
+                    "❌ تاریخ پایان نمی‌تواند قبل از تاریخ شروع باشد.\n\n"
+                    "لطفاً تاریخ پایان را دوباره وارد کنید.",
+                    MAIN_MENU_BUTTONS
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            session_data[
+                "end_date"
+            ] = end_date
+        
+            times_text = "\n".join(
+                f"• {time}"
+                for time in session_data["times"]
+            )
+        
+            start_date_text = format_jalali_date(
+                session_data["start_date"]
+            )
+        
+            end_date_text = format_jalali_date(
+                session_data["end_date"]
+            )
+        
+            set_session(
+                user_id,
+                "CONFIRM_MEDICATION",
+                session_data
+            )
+        
+            send_message(
+                chat_id,
+                "💊 اطلاعات دارو:\n\n"
+                f"نام: "
+                f"{session_data['medication_name']}\n"
+                f"دفعات روزانه: "
+                f"{session_data['doses_per_day']}\n"
+                f"تعداد دوز: "
+                f"{session_data['number_of_doses']}\n\n"
+                f"⏰ زمان‌ها:\n"
+                f"{times_text}\n\n"
+                f"📅 تاریخ شروع: "
+                f"{start_date_text}\n"
+                f"📅 تاریخ پایان: "
+                f"{end_date_text}\n\n"
+                "آیا اطلاعات صحیح است؟",
+                [
+                    ["✅ ثبت دارو"],
+                    ["❌ لغو"]
+                ]
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
         # =================================================
         # AI DRUG QUESTION STATE
         # =================================================
