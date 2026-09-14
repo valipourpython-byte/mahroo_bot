@@ -1415,6 +1415,253 @@ def drug_to_context(
         context
     )
 
+# =========================================================
+# GET ALL DRUG NAMES FROM DATABASE
+# =========================================================
+
+def get_all_drug_names():
+
+    try:
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+
+                cur.execute(
+                    """
+                    SELECT DISTINCT generic_name
+                    FROM drugs
+                    WHERE generic_name IS NOT NULL
+                      AND TRIM(generic_name) <> ''
+                    ORDER BY LENGTH(generic_name) DESC;
+                    """
+                )
+
+                rows = cur.fetchall()
+
+        drug_names = [
+            str(row[0]).strip()
+            for row in rows
+            if row[0]
+        ]
+
+        print(
+            "Total generic drug names loaded from DB:",
+            len(drug_names),
+            flush=True
+        )
+
+        return drug_names
+
+    except Exception as e:
+
+        print(
+            "Error loading drug names from DB:",
+            repr(e),
+            flush=True
+        )
+
+        return []
+
+
+# =========================================================
+# FIND DATABASE DRUG NAMES INSIDE QUESTION
+# =========================================================
+
+def find_direct_drug_names_in_question(question):
+
+    question_normalized = clean_drug_text(question).lower()
+
+    if not question_normalized:
+        return []
+
+    drug_names = get_all_drug_names()
+
+    found = []
+
+    for drug_name in drug_names:
+
+        drug_normalized = clean_drug_text(
+            str(drug_name)
+        ).lower()
+
+        if not drug_normalized:
+            continue
+
+        if drug_normalized in question_normalized:
+
+            found.append(drug_name)
+
+    # Longer names first
+    found = sorted(
+        set(found),
+        key=lambda x: len(str(x)),
+        reverse=True
+    )
+
+    print(
+        "Direct DB drug matches:",
+        found,
+        flush=True
+    )
+
+    return found
+
+
+# =========================================================
+# EXTRACT PERSIAN DRUG CANDIDATES
+# =========================================================
+
+def extract_persian_candidates(question):
+
+    import re
+
+    question = clean_drug_text(question)
+
+    if not question:
+        return []
+
+    # Persian word sequences
+    words = re.findall(
+        r'[\u0600-\u06FF]+',
+        question
+    )
+
+    # Common Persian words that should NEVER
+    # be sent to the drug resolver
+    stop_words = {
+        "ایا",
+        "آیا",
+        "می",
+        "میتونم",
+        "میتوانم",
+        "میشه",
+        "میشود",
+        "میشه",
+        "با",
+        "و",
+        "را",
+        "رو",
+        "برای",
+        "چی",
+        "چه",
+        "خوب",
+        "خوبه",
+        "است",
+        "هست",
+        "هستند",
+        "کنم",
+        "کنم",
+        "مصرف",
+        "کنار",
+        "هم",
+        "باهم",
+        "دارو",
+        "دارویی",
+        "تداخل",
+        "عوارض",
+        "باعث",
+        "آیا",
+        "من",
+        "این",
+        "آن",
+        "از",
+        "در",
+        "به",
+        "که",
+        "چطور",
+        "چگونه",
+        "میتوان",
+        "میتواند",
+        "شد",
+        "شود",
+        "دارد",
+        "دارم",
+        "دارید",
+        "بخورم",
+        "بخوریم",
+        "بخورم",
+        "استفاده",
+        "کنید",
+        "کردن",
+        "کرد",
+        "کردم",
+        "چیه",
+        "چیست",
+        "میشه",
+        "لطفا",
+        "لطفاً"
+    }
+
+    candidates = []
+
+    # -----------------------------------------------------
+    # Single-word candidates
+    # -----------------------------------------------------
+
+    for word in words:
+
+        word = word.strip()
+
+        if not word:
+            continue
+
+        if word in stop_words:
+            continue
+
+        if len(word) < 3:
+            continue
+
+        candidates.append(word)
+
+    # -----------------------------------------------------
+    # Two-word and three-word candidates
+    # -----------------------------------------------------
+
+    filtered_words = [
+        word
+        for word in words
+        if word not in stop_words
+        and len(word) >= 2
+    ]
+
+    for i in range(len(filtered_words)):
+
+        # Two words
+        if i + 1 < len(filtered_words):
+
+            candidate = (
+                filtered_words[i]
+                + " "
+                + filtered_words[i + 1]
+            )
+
+            candidates.append(candidate)
+
+        # Three words
+        if i + 2 < len(filtered_words):
+
+            candidate = (
+                filtered_words[i]
+                + " "
+                + filtered_words[i + 1]
+                + " "
+                + filtered_words[i + 2]
+            )
+
+            candidates.append(candidate)
+
+    # Remove duplicates
+    candidates = list(
+        dict.fromkeys(candidates)
+    )
+
+    print(
+        "Persian drug candidates:",
+        candidates,
+        flush=True
+    )
+
+    return candidates
 
 # =========================================================
 # FIND DRUGS IN USER QUESTION
@@ -1433,206 +1680,119 @@ def find_drugs_in_question(question):
         flush=True
     )
 
-    # -----------------------------------------------------
+    resolved_names = []
+
+    # =====================================================
     # STEP 1
-    # Ask LLM ONLY to extract possible drug names.
-    #
-    # It does NOT answer the medical question.
-    # It only identifies names appearing in the question.
-    # -----------------------------------------------------
-
-    extraction_prompt = f"""
-You are a drug-name extraction system.
-
-Your ONLY task is to identify medication/drug names mentioned
-in the user's question.
-
-The drug names may be:
-- Persian names
-- English generic names
-- Brand names
-- Misspelled drug names
-- Common transliterations of drug names
-
-Examples:
-
-Question:
-"آسپرین با وارفارین تداخل داره؟"
-
-Output:
-["آسپرین", "وارفارین"]
-
-Question:
-"آیا Tylenol و ibuprofen را می‌توان با هم مصرف کرد؟"
-
-Output:
-["Tylenol", "ibuprofen"]
-
-Question:
-"برای فشار خون چه دارویی بهتر است؟"
-
-Output:
-[]
-
-IMPORTANT:
-- Extract ONLY names that appear to be drugs.
-- Do NOT answer the user's question.
-- Do NOT explain anything.
-- Do NOT translate the names.
-- Do NOT invent drug names.
-- Return ONLY a valid JSON array.
-- If no drug name is present, return [].
-
-User question:
-{question}
-"""
-
-    candidate_names = []
-
-    try:
-
-        print(
-            "QUESTION DRUG DETECTION: Calling AI extractor...",
-            flush=True
-        )
-
-        response = ask_llm(extraction_prompt)
-
-        print(
-            "QUESTION DRUG DETECTION RAW RESPONSE:",
-            repr(response),
-            flush=True
-        )
-
-        if response:
-
-            import json
-            import re
-
-            cleaned_response = (
-                response
-                .replace("```json", "")
-                .replace("```", "")
-                .strip()
-            )
-
-            try:
-                extracted = json.loads(cleaned_response)
-
-                if isinstance(extracted, list):
-
-                    candidate_names = [
-                        str(x).strip()
-                        for x in extracted
-                        if str(x).strip()
-                    ]
-
-            except Exception:
-
-                print(
-                    "JSON parsing failed. Trying regex fallback...",
-                    flush=True
-                )
-
-                match = re.search(
-                    r"\[(.*?)\]",
-                    cleaned_response,
-                    re.DOTALL
-                )
-
-                if match:
-
-                    inside = match.group(1)
-
-                    candidate_names = [
-                        x.strip().strip('"').strip("'")
-                        for x in inside.split(",")
-                        if x.strip()
-                    ]
-
-    except Exception as e:
-
-        print(
-            "Question drug extraction error:",
-            repr(e),
-            flush=True
-        )
-
-    # -----------------------------------------------------
-    # STEP 2
-    # Remove duplicates
-    # -----------------------------------------------------
-
-    candidate_names = list(
-        dict.fromkeys(candidate_names)
-    )
+    # Direct matching against ALL database drug names
+    # =====================================================
 
     print(
-        "Extracted drug candidates:",
-        candidate_names,
+        "QUESTION DRUG DETECTION STEP 1:",
+        "Searching all DB drug names...",
         flush=True
     )
 
-    if not candidate_names:
-        return []
+    direct_matches = find_direct_drug_names_in_question(
+        question
+    )
 
-    # -----------------------------------------------------
-    # STEP 3
-    # Resolve EVERY extracted name using the SAME resolver
-    # used by drug search mode.
-    # -----------------------------------------------------
+    for drug_name in direct_matches:
 
-    resolved_names = []
+        if drug_name not in resolved_names:
 
-    for candidate in candidate_names:
+            resolved_names.append(drug_name)
+
+    # =====================================================
+    # STEP 2
+    # Persian / misspelled / transliterated candidates
+    # =====================================================
+
+    print(
+        "QUESTION DRUG DETECTION STEP 2:",
+        "Searching Persian candidates...",
+        flush=True
+    )
+
+    persian_candidates = extract_persian_candidates(
+        question
+    )
+
+    for candidate in persian_candidates:
+
+        # If this candidate is already essentially
+        # covered by a direct match, skip it.
+        if any(
+            candidate.lower() in str(name).lower()
+            for name in direct_matches
+        ):
+            continue
 
         try:
 
             print(
-                "Resolving drug candidate:",
-                candidate,
+                "Trying drug resolver:",
+                repr(candidate),
                 flush=True
             )
 
-            resolved_name = resolve_drug_name(candidate)
+            resolved_name = resolve_drug_name(
+                candidate
+            )
 
             print(
                 "Resolver result:",
-                candidate,
+                repr(candidate),
                 "->",
-                resolved_name,
+                repr(resolved_name),
                 flush=True
             )
 
             if resolved_name:
-                resolved_names.append(resolved_name)
+
+                if resolved_name not in resolved_names:
+
+                    resolved_names.append(
+                        resolved_name
+                    )
 
         except Exception as e:
 
             print(
-                "Drug resolver error:",
-                candidate,
+                "Resolver error for candidate:",
+                repr(candidate),
                 repr(e),
                 flush=True
             )
+
+    # =====================================================
+    # STEP 3
+    # Remove duplicate resolved names
+    # =====================================================
 
     resolved_names = list(
         dict.fromkeys(resolved_names)
     )
 
     print(
-        "Resolved drug names:",
+        "FINAL RESOLVED DRUG NAMES:",
         resolved_names,
         flush=True
     )
 
     if not resolved_names:
+
+        print(
+            "No drugs detected in question.",
+            flush=True
+        )
+
         return []
 
-    # -----------------------------------------------------
+    # =====================================================
     # STEP 4
-    # Retrieve information from the drug database
-    # -----------------------------------------------------
+    # Retrieve actual drug information from DB
+    # =====================================================
 
     found_drugs = []
 
@@ -1641,12 +1801,14 @@ User question:
         try:
 
             print(
-                "Searching drug database:",
-                drug_name,
+                "Searching database for:",
+                repr(drug_name),
                 flush=True
             )
 
-            drug = search_drug_database(drug_name)
+            drug = search_drug_database(
+                drug_name
+            )
 
             if drug:
 
@@ -1654,15 +1816,15 @@ User question:
 
                 print(
                     "Drug information found:",
-                    drug_name,
+                    repr(drug_name),
                     flush=True
                 )
 
             else:
 
                 print(
-                    "No drug information found:",
-                    drug_name,
+                    "No database information found for:",
+                    repr(drug_name),
                     flush=True
                 )
 
@@ -1670,15 +1832,15 @@ User question:
 
             print(
                 "Drug database search error:",
-                drug_name,
+                repr(drug_name),
                 repr(e),
                 flush=True
             )
 
-    # -----------------------------------------------------
+    # =====================================================
     # STEP 5
-    # Remove duplicate drugs
-    # -----------------------------------------------------
+    # Remove duplicate drugs using RxCUI
+    # =====================================================
 
     unique_drugs = []
 
@@ -1686,7 +1848,9 @@ User question:
 
     for drug in found_drugs:
 
-        rxcui = drug.get("generic_rxcui")
+        rxcui = drug.get(
+            "generic_rxcui"
+        )
 
         if rxcui:
 
