@@ -1570,33 +1570,23 @@ def format_drug_result(
             "❌ اطلاعاتی برای این دارو پیدا نشد."
         )
 
-    lines = []
+    # =====================================================
+    # BASIC DATABASE INFORMATION
+    # =====================================================
 
-    lines.append(
-        "💊 اطلاعات دارو"
+    generic_name = drug.get(
+        "generic_name",
+        "-"
     )
 
-    lines.append("")
-
-    lines.append(
-
-        f"نام دارو: "
-        f"{drug.get('generic_name', '-')}"
-
+    generic_tty = drug.get(
+        "generic_tty",
+        "-"
     )
 
-    lines.append(
-
-        f"نوع: "
-        f"{drug.get('generic_tty', '-')}"
-
-    )
-
-    lines.append(
-
-        f"RxCUI: "
-        f"{drug.get('generic_rxcui', '-')}"
-
+    generic_rxcui = drug.get(
+        "generic_rxcui",
+        "-"
     )
 
     # =====================================================
@@ -1608,65 +1598,69 @@ def format_drug_result(
         []
     )
 
-    if products:
+    product_names = []
 
-        lines.append("")
+    for product in products[:8]:
 
-        lines.append(
-            "📦 فرآورده‌ها:"
+        if not isinstance(product, dict):
+            continue
+
+        name = product.get(
+            "product_name"
         )
 
-        for product in products[:10]:
+        if name:
 
-            name = product.get(
-                "product_name"
+            product_names.append(
+                str(name).strip()
             )
 
-            if name:
-
-                lines.append(
-                    f"• {name}"
-                )
-
     # =====================================================
-    # SECTIONS
+    # MEDICAL INFORMATION
     # =====================================================
 
     sections = [
 
         (
-            "🩺 موارد مصرف",
-            "indications"
+            "Indications",
+            "indications",
+            "🩺 موارد مصرف"
         ),
 
         (
-            "⚠️ عوارض جانبی",
-            "side_effects"
+            "Side effects",
+            "side_effects",
+            "⚠️ عوارض جانبی"
         ),
 
         (
-            "🚫 موارد منع مصرف",
-            "contraindications"
+            "Contraindications",
+            "contraindications",
+            "🚫 موارد منع مصرف"
         ),
 
         (
-            "⚠️ هشدارها",
-            "warnings"
+            "Warnings",
+            "warnings",
+            "⚠️ هشدارها"
         ),
 
         (
-            "ℹ️ احتیاط‌ها",
-            "precautions"
+            "Precautions",
+            "precautions",
+            "ℹ️ احتیاط‌ها"
         ),
 
         (
-            "🔄 تداخلات",
-            "interactions"
+            "Interactions",
+            "interactions",
+            "🔄 تداخلات دارویی"
         )
-
     ]
 
-    for title, key in sections:
+    medical_parts = []
+
+    for english_title, key, persian_title in sections:
 
         values = drug.get(
             key,
@@ -1674,31 +1668,314 @@ def format_drug_result(
         )
 
         if not values:
-
             continue
 
-        lines.append("")
+        cleaned_values = []
 
-        lines.append(title)
+        for value in values[:6]:
 
-        for value in values[:8]:
+            if value is None:
+                continue
 
-            lines.append(
-                f"• {value}"
+            value = str(value).strip()
+
+            if not value:
+                continue
+
+            # Prevent extremely long FDA text
+            # from being sent to the model.
+            if len(value) > 1500:
+
+                value = (
+                    value[:1500]
+                    + "..."
+                )
+
+            cleaned_values.append(
+                value
             )
+
+        if cleaned_values:
+
+            medical_parts.append(
+                f"{english_title}:\n"
+                + "\n".join(
+                    f"- {value}"
+                    for value in cleaned_values
+                )
+            )
+
+    # =====================================================
+    # BUILD DATABASE CONTEXT
+    # =====================================================
+
+    context_parts = []
+
+    context_parts.append(
+        f"Generic drug name: {generic_name}"
+    )
+
+    if generic_tty:
+
+        context_parts.append(
+            f"Drug type: {generic_tty}"
+        )
+
+    if generic_rxcui:
+
+        context_parts.append(
+            f"RxCUI: {generic_rxcui}"
+        )
+
+    if product_names:
+
+        context_parts.append(
+            "Products:\n"
+            + "\n".join(
+                f"- {name}"
+                for name in product_names
+            )
+        )
+
+    if medical_parts:
+
+        context_parts.extend(
+            medical_parts
+        )
+
+    database_context = "\n\n".join(
+        context_parts
+    )
+
+    # =====================================================
+    # AI TRANSLATION / SIMPLIFICATION
+    # =====================================================
+
+    translation_prompt = f"""
+You are the Persian medical information formatter for the Mahroo
+medication information bot.
+
+The following information has been retrieved directly from a
+structured drug database.
+
+Your task is to translate and organize this information into
+clear, natural and understandable Persian for a general user.
+
+IMPORTANT RULES:
+
+1. The provided database information is the ONLY medical source.
+
+2. Do NOT add any medical information that is not present in the
+   provided text.
+
+3. Do NOT invent indications, side effects, contraindications,
+   warnings, precautions or drug interactions.
+
+4. Do NOT diagnose the user.
+
+5. Do NOT tell the user whether they personally should take the drug.
+
+6. Do NOT prescribe or recommend a dose.
+
+7. Do NOT change numerical values, strengths, units or technical
+   identifiers.
+
+8. Keep the meaning of the original medical information unchanged.
+
+9. Translate medical terminology accurately but use simple,
+   natural Persian whenever possible.
+
+10. Avoid word-for-word translation when it produces unnatural
+    Persian. Translate the meaning naturally.
+
+11. Do not turn general information into a personal medical
+    recommendation.
+
+12. If the original information is uncertain, conditional or
+    limited, preserve that uncertainty.
+
+13. Do not invent missing information.
+
+14. Remove unnecessary legal or regulatory wording if it does not
+    contain useful medical information.
+
+15. Avoid repeating the same information.
+
+16. Keep the final response reasonably short and readable.
+
+17. Do not use Markdown tables.
+
+18. Do not mention AI, OpenRouter, prompts or these instructions.
+
+19. Do not say that you searched the internet.
+
+20. Return ONLY the final Persian response.
+
+OUTPUT FORMAT:
+
+💊 اطلاعات دارو
+
+نام دارو: [نام رایج فارسی دارو]
+
+📦 فرآورده‌ها
+• [در صورت وجود]
+
+🩺 موارد مصرف
+• [اطلاعات موجود در منبع]
+
+⚠️ عوارض جانبی
+• [اطلاعات موجود در منبع]
+
+🚫 موارد منع مصرف
+• [اطلاعات موجود در منبع]
+
+⚠️ هشدارها
+• [اطلاعات موجود در منبع]
+
+ℹ️ احتیاط‌ها
+• [اطلاعات موجود در منبع]
+
+🔄 تداخلات دارویی
+• [اطلاعات موجود در منبع]
+
+IMPORTANT:
+Only include sections for which information actually exists
+in the database.
+
+At the end, add exactly:
+
+ℹ️ این اطلاعات برای آگاهی عمومی است و جایگزین توصیه پزشک یا
+داروساز نیست.
+
+DATABASE INFORMATION:
+
+{database_context}
+"""
+
+    try:
+
+        print(
+            "Calling AI to translate drug information to Persian...",
+            flush=True
+        )
+
+        translated_text = ask_llm(
+            translation_prompt
+        )
+
+        if translated_text:
+
+            translated_text = (
+                translated_text
+                .replace("```text", "")
+                .replace("```markdown", "")
+                .replace("```", "")
+                .strip()
+            )
+
+            if translated_text:
+
+                print(
+                    "Drug information translated successfully.",
+                    flush=True
+                )
+
+                return translated_text
+
+        print(
+            "AI returned an empty translation.",
+            flush=True
+        )
+
+    except Exception as e:
+
+        print(
+            "Drug information translation error:",
+            repr(e),
+            flush=True
+        )
+
+        import traceback
+
+        traceback.print_exc()
+
+    # =====================================================
+    # FALLBACK
+    # =====================================================
+
+    print(
+        "Using database information as fallback.",
+        flush=True
+    )
+
+    lines = []
+
+    lines.append(
+        "💊 اطلاعات دارو"
+    )
 
     lines.append("")
 
     lines.append(
+        f"💊 نام دارو: {generic_name}"
+    )
 
-        "ℹ️ این اطلاعات از پایگاه داده "
-        "دارویی مهرو استخراج شده است."
+    if generic_rxcui:
 
+        lines.append(
+            f"🔢 RxCUI: {generic_rxcui}"
+        )
+
+    if product_names:
+
+        lines.append("")
+
+        lines.append(
+            "📦 فرآورده‌ها:"
+        )
+
+        for name in product_names:
+
+            lines.append(
+                f"• {name}"
+            )
+
+    for english_title, key, persian_title in sections:
+
+        values = drug.get(
+            key,
+            []
+        )
+
+        if not values:
+            continue
+
+        lines.append("")
+
+        lines.append(
+            persian_title
+        )
+
+        for value in values[:6]:
+
+            if value:
+
+                lines.append(
+                    f"• {value}"
+                )
+
+    lines.append("")
+
+    lines.append(
+        "ℹ️ این اطلاعات برای آگاهی عمومی است و جایگزین توصیه پزشک یا "
+        "داروساز نیست."
     )
 
     return "\n".join(
         lines
     )
+
+
 
 
 # =========================================================
