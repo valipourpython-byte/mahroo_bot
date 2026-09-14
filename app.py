@@ -4735,7 +4735,44 @@ def receive_message():
                 "status": "ok"
             })
 
-       # =================================================
+
+
+
+        # =========================
+        # PROFILE - FULL NAME
+        # =========================
+        
+        if state == "PROFILE_ASK_FULL_NAME":
+        
+            full_name = text.strip()
+        
+            if not full_name:
+                send_message(
+                    chat_id,
+                    "❌ نام و نام خانوادگی نمی‌تواند خالی باشد.\n\n"
+                    "لطفاً نام و نام خانوادگی خود را وارد کنید:"
+                )
+                return "", 200
+        
+            session_data["full_name"] = full_name
+        
+            set_session(
+                user_id,
+                "PROFILE_ASK_BIRTH_DATE",
+                session_data
+            )
+        
+            send_message(
+                chat_id,
+                "🎂 تاریخ تولد خود را به صورت شمسی وارد کنید.\n\n"
+                "مثال:\n"
+                "<code>1375/05/20</code>"
+            )
+        
+            return "", 200
+
+        
+        # =================================================
         # DRUG SEARCH STATE
         # =================================================
         
@@ -4956,6 +4993,7 @@ def receive_message():
                 return jsonify({
                     "status": "ok"
                 })
+        
 
 
 
