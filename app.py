@@ -971,40 +971,102 @@ def schedule_to_datetime(
 
     )
 def parse_jalali_date(text):
-    """
-    دریافت تاریخ شمسی به فرمت YYYY/MM/DD
-    و تبدیل آن به تاریخ میلادی برای ذخیره در PostgreSQL.
-    """
+
+    print("========== PARSE JALALI DATE START ==========", flush=True)
+    print("INPUT:", repr(text), flush=True)
 
     try:
+
+        import jdatetime
+
+        print(
+            "JDATETIME IMPORT OK:",
+            jdatetime,
+            flush=True
+        )
+
         text = text.strip()
 
         parts = text.split("/")
 
+        print(
+            "PARTS:",
+            parts,
+            flush=True
+        )
+
         if len(parts) != 3:
+
+            print(
+                "INVALID PART COUNT",
+                flush=True
+            )
+
             return None
 
         year = int(parts[0])
         month = int(parts[1])
         day = int(parts[2])
 
-        # بررسی منطقی بودن تاریخ شمسی
+        print(
+            "YEAR:",
+            year,
+            "MONTH:",
+            month,
+            "DAY:",
+            day,
+            flush=True
+        )
+
         jalali_date = jdatetime.date(
             year,
             month,
             day
         )
 
-        # تبدیل به تاریخ میلادی
-        return jalali_date.togregorian()
+        print(
+            "JALALI DATE OBJECT:",
+            jalali_date,
+            flush=True
+        )
+
+        gregorian_date = jalali_date.togregorian()
+
+        print(
+            "GREGORIAN DATE:",
+            gregorian_date,
+            flush=True
+        )
+
+        print(
+            "========== PARSE JALALI DATE SUCCESS ==========",
+            flush=True
+        )
+
+        return gregorian_date
 
     except Exception as e:
 
         print(
-            "JALALI DATE PARSE ERROR:",
+            "========== JALALI DATE PARSE ERROR ==========",
+            flush=True
+        )
+
+        print(
+            "ERROR TYPE:",
+            type(e).__name__,
+            flush=True
+        )
+
+        print(
+            "ERROR:",
             repr(e),
             flush=True
         )
+
+        import traceback
+
+        traceback.print_exc()
 
         return None
 
