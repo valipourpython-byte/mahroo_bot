@@ -263,6 +263,7 @@ def init_database():
 # =========================================================
 
 MAIN_MENU_BUTTONS = [
+    ["👤 پروفایل سلامت من"],
     ["📊 داشبورد من"],
     ["➕  افزودن دارو بصورت دستی"],
     ["💊 داروهای من"],
@@ -873,7 +874,165 @@ def clear_session(
 
             conn.commit()
 
+def get_patient_profile(user_id):
+    """
+    دریافت پروفایل سلامت کاربر بر اساس user_id
+    """
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT
+                    id,
+                    full_name,
+                    birth_date,
+                    gender,
+                    allergies,
+                    medical_history,
+                    important_notes
+                FROM mahroo_patient_profiles
+                WHERE user_id = %s
+            """, (user_id,))
 
+            row = cur.fetchone()
+
+            if not row:
+                return None
+
+            return {
+                "id": row[0],
+                "full_name": row[1],
+                "birth_date": row[2],
+                "gender": row[3],
+                "allergies": row[4],
+                "medical_history": row[5],
+                "important_notes": row[6]
+            }
+
+
+def save_patient_profile(
+    user_id,
+    full_name,
+    birth_date,
+    gender,
+    allergies,
+    medical_history,
+    important_notes
+):
+    """
+    ثبت یا بروزرسانی پروفایل سلامت کاربر
+    """
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+
+            cur.execute("""
+                INSERT INTO mahroo_patient_profiles (
+                    user_id,
+                    full_name,
+                    birth_date,
+                    gender,
+                    allergies,
+                    medical_history,
+                    important_notes,
+                    created_at,
+                    updated_at
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    CURRENT_TIMESTAMP,
+                    CURRENT_TIMESTAMP
+                )
+                ON CONFLICT (user_id)
+                DO UPDATE SET
+                    full_name = EXCLUDED.full_name,
+                    birth_date = EXCLUDED.birth_date,
+                    gender = EXCLUDED.gender,
+                    allergies = EXCLUDED.allergies,
+                    medical_history = EXCLUDED.medical_history,
+                    important_notes = EXCLUDED.important_notes,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (
+                user_id,
+                full_name,
+                birth_date,
+                gender,
+                allergies,
+                medical_history,
+                important_notes
+            ))
+
+            conn.commit()
+
+def show_patient_profile(chat_id, user_id):
+    """
+    نمایش پروفایل سلامت کاربر
+    """
+
+    profile = get_patient_profile(user_id)
+
+    if not profile:
+        set_session(
+            user_id,
+            "PROFILE_ASK_FULL_NAME",
+            {}
+        )
+
+        send_message(
+            chat_id,
+            "👤 <b>پروفایل سلامت</b>\n\n"
+            "برای ساخت پروفایل سلامت، لطفاً نام و نام خانوادگی خود را وارد کنید:"
+        )
+
+        return
+
+    birth_date = profile["birth_date"]
+
+    if birth_date:
+        birth_date_text = format_jalali_date(birth_date)
+    else:
+        birth_date_text = "ثبت نشده"
+
+    gender = profile["gender"] or "ثبت نشده"
+    allergies = profile["allergies"] or "ثبت نشده"
+    medical_history = profile["medical_history"] or "ثبت نشده"
+    important_notes = profile["important_notes"] or "ثبت نشده"
+
+    message = (
+        "👤 <b>پروفایل سلامت من</b>\n\n"
+        f"👤 <b>نام و نام خانوادگی:</b>\n"
+        f"{profile['full_name'] or 'ثبت نشده'}\n\n"
+        f"🎂 <b>تاریخ تولد:</b>\n"
+        f"{birth_date_text}\n\n"
+        f"⚧ <b>جنسیت:</b>\n"
+        f"{gender}\n\n"
+        f"⚠️ <b>حساسیت‌ها:</b>\n"
+        f"{allergies}\n\n"
+        f"🩺 <b>سابقه بیماری:</b>\n"
+        f"{medical_history}\n\n"
+        f"📝 <b>یادداشت‌های مهم:</b>\n"
+        f"{important_notes}"
+    )
+
+    send_message(
+        chat_id,
+        message,
+        keyboard=[
+            ["✏️ ویرایش پروفایل"],
+            ["↩️ منوی اصلی"]
+        ]
+    )
+
+    set_session(
+        user_id,
+        "PROFILE_VIEW",
+        {}
+    )
 def save_display_name(
     user_id,
     display_name
