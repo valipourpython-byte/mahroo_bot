@@ -975,17 +975,37 @@ def parse_jalali_date(text):
     دریافت تاریخ شمسی به فرمت YYYY/MM/DD
     و تبدیل آن به تاریخ میلادی برای ذخیره در PostgreSQL.
     """
+
     try:
         text = text.strip()
 
-        jalali_date = jdatetime.datetime.strptime(
-            text,
-            "%Y/%m/%d"
-        ).date()
+        parts = text.split("/")
 
+        if len(parts) != 3:
+            return None
+
+        year = int(parts[0])
+        month = int(parts[1])
+        day = int(parts[2])
+
+        # بررسی منطقی بودن تاریخ شمسی
+        jalali_date = jdatetime.date(
+            year,
+            month,
+            day
+        )
+
+        # تبدیل به تاریخ میلادی
         return jalali_date.togregorian()
 
-    except Exception:
+    except Exception as e:
+
+        print(
+            "JALALI DATE PARSE ERROR:",
+            repr(e),
+            flush=True
+        )
+
         return None
 
 
