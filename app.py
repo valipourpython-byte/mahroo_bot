@@ -4105,144 +4105,144 @@ def receive_message():
         
             try:
 
-        # =================================================
-        # Resolve Persian / English / brand drug name
-        # =================================================
-
-        resolved_name = resolve_drug_name(text)
-
-        print(
-            "Resolved drug name:",
-            resolved_name,
-            flush=True
-        )
-
-        if not resolved_name:
-
-            send_message(
-
-                chat_id,
-
-                f"❌ دارویی با نام "
-                f"«{text}» در پایگاه داده "
-                "پیدا نشد.\n\n"
-                "لطفاً نام دارو را دوباره وارد کنید.",
-
-                MAIN_MENU_BUTTONS
-
-            )
-
-            set_session(
-
-                user_id,
-
-                "ASK_DRUG_SEARCH"
-
-            )
-
-            return jsonify({
-                "status": "ok"
-            })
-
-        # =================================================
-        # Search database using resolved English name
-        # =================================================
-
-        drug = search_drug_database(
-            resolved_name
-        )
-
-        if not drug:
-
-            send_message(
-
-                chat_id,
-
-                f"❌ دارویی با نام "
-                f"«{text}» در پایگاه داده "
-                "پیدا نشد.\n\n"
-                "لطفاً نام دارو را دوباره وارد کنید.",
-
-                MAIN_MENU_BUTTONS
-
-            )
-
-            set_session(
-
-                user_id,
-
-                "ASK_DRUG_SEARCH"
-
-            )
-
-            return jsonify({
-                "status": "ok"
-            })
-
-        # =================================================
-        # Format result
-        # =================================================
-
-        result_text = format_drug_result(
-            drug
-        )
-
-        send_message(
-
-            chat_id,
-
-            result_text,
-
-            MAIN_MENU_BUTTONS
-
-        )
-
-        # Stay in search mode
-        set_session(
-
-            user_id,
-
-            "ASK_DRUG_SEARCH"
-
-        )
-
-        return jsonify({
-            "status": "ok"
-        })
-
-    except Exception as e:
-
-        print(
-
-            "Drug search error:",
-
-            repr(e)
-
-        )
-
-        send_message(
-
-            chat_id,
-
-            "❌ هنگام جستجوی دارو "
-            "خطایی رخ داد.\n\n"
-            "لطفاً دوباره تلاش کنید.",
-
-            MAIN_MENU_BUTTONS
-
-        )
-
-        set_session(
-
-            user_id,
-
-            "ASK_DRUG_SEARCH"
-
-        )
-
-        return jsonify({
-            "status": "ok"
-        })
+                # =================================================
+                # Resolve Persian / English / brand drug name
+                # =================================================
+        
+                resolved_name = resolve_drug_name(text)
+        
+                print(
+                    "Resolved drug name:",
+                    resolved_name,
+                    flush=True
+                )
+        
+                if not resolved_name:
+        
+                    send_message(
+        
+                        chat_id,
+        
+                        f"❌ دارویی با نام "
+                        f"«{text}» در پایگاه داده "
+                        "پیدا نشد.\n\n"
+                        "لطفاً نام دارو را دوباره وارد کنید.",
+        
+                        MAIN_MENU_BUTTONS
+        
+                    )
+        
+                    set_session(
+        
+                        user_id,
+        
+                        "ASK_DRUG_SEARCH"
+        
+                    )
+        
+                    return jsonify({
+                        "status": "ok"
+                    })
+        
+                # =================================================
+                # Search database using resolved English name
+                # =================================================
+        
+                drug = search_drug_database(
+                    resolved_name
+                )
+        
+                if not drug:
+        
+                    send_message(
+        
+                        chat_id,
+        
+                        f"❌ دارویی با نام "
+                        f"«{text}» در پایگاه داده "
+                        "پیدا نشد.\n\n"
+                        "لطفاً نام دارو را دوباره وارد کنید.",
+        
+                        MAIN_MENU_BUTTONS
+        
+                    )
+        
+                    set_session(
+        
+                        user_id,
+        
+                        "ASK_DRUG_SEARCH"
+        
+                    )
+        
+                    return jsonify({
+                        "status": "ok"
+                    })
+        
+                # =================================================
+                # Format result
+                # =================================================
+        
+                result_text = format_drug_result(
+                    drug
+                )
+        
+                send_message(
+        
+                    chat_id,
+        
+                    result_text,
+        
+                    MAIN_MENU_BUTTONS
+        
+                )
+        
+                # Stay in search mode
+                set_session(
+        
+                    user_id,
+        
+                    "ASK_DRUG_SEARCH"
+        
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            except Exception as e:
+        
+                print(
+        
+                    "Drug search error:",
+        
+                    repr(e)
+        
+                )
+        
+                send_message(
+        
+                    chat_id,
+        
+                    "❌ هنگام جستجوی دارو "
+                    "خطایی رخ داد.\n\n"
+                    "لطفاً دوباره تلاش کنید.",
+        
+                    MAIN_MENU_BUTTONS
+        
+                )
+        
+                set_session(
+        
+                    user_id,
+        
+                    "ASK_DRUG_SEARCH"
+        
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
         # =================================================
         # MEDICATION LIST STATE
         # =================================================
