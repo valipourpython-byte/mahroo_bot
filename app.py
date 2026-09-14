@@ -4968,9 +4968,30 @@ def receive_message():
         
         if state == "ASK_END_DATE":
         
+            print(
+                "========== ASK END DATE ENTERED ==========",
+                flush=True
+            )
+        
+            print(
+                "STEP A: Calling parse_jalali_date...",
+                flush=True
+            )
+        
             end_date = parse_jalali_date(text)
         
+            print(
+                "STEP B: parse_jalali_date returned:",
+                repr(end_date),
+                flush=True
+            )
+        
             if end_date is None:
+        
+                print(
+                    "STEP C: End date is invalid",
+                    flush=True
+                )
         
                 send_message(
                     chat_id,
@@ -4985,16 +5006,27 @@ def receive_message():
                     "status": "ok"
                 })
         
+            print(
+                "STEP D: Reading start_date from session...",
+                flush=True
+            )
+        
             start_date = session_data.get(
                 "start_date"
             )
-            if start_date:
-                start_date = datetime.strptime(
-                    start_date,
-                    "%Y-%m-%d"
-                ).date()
+        
+            print(
+                "START DATE FROM SESSION:",
+                repr(start_date),
+                flush=True
+            )
         
             if start_date is None:
+        
+                print(
+                    "STEP E: start_date is missing",
+                    flush=True
+                )
         
                 send_message(
                     chat_id,
@@ -5013,7 +5045,42 @@ def receive_message():
                     "status": "ok"
                 })
         
+            # -------------------------------------------------
+            # Convert stored ISO string back to date
+            # -------------------------------------------------
+        
+            if isinstance(
+                start_date,
+                str
+            ):
+        
+                start_date = datetime.strptime(
+                    start_date,
+                    "%Y-%m-%d"
+                ).date()
+        
+            print(
+                "START DATE CONVERTED:",
+                repr(start_date),
+                flush=True
+            )
+        
+            print(
+                "END DATE:",
+                repr(end_date),
+                flush=True
+            )
+        
+            # -------------------------------------------------
+            # Check date order
+            # -------------------------------------------------
+        
             if end_date < start_date:
+        
+                print(
+                    "STEP F: End date is before start date",
+                    flush=True
+                )
         
                 send_message(
                     chat_id,
@@ -5026,27 +5093,78 @@ def receive_message():
                     "status": "ok"
                 })
         
+            print(
+                "STEP G: Date range is valid",
+                flush=True
+            )
+        
+            # -------------------------------------------------
+            # Store end date as ISO string
+            # -------------------------------------------------
+        
             session_data[
                 "end_date"
-            ] = end_date
+            ] = end_date.isoformat()
+        
+            print(
+                "STEP H: session_data updated:",
+                repr(session_data),
+                flush=True
+            )
         
             times_text = "\n".join(
                 f"• {time}"
                 for time in session_data["times"]
             )
         
+            # Convert dates for display
             start_date_text = format_jalali_date(
-                session_data["start_date"]
+                start_date
             )
         
             end_date_text = format_jalali_date(
-                session_data["end_date"]
+                end_date
+            )
+        
+            print(
+                "START DATE DISPLAY:",
+                start_date_text,
+                flush=True
+            )
+        
+            print(
+                "END DATE DISPLAY:",
+                end_date_text,
+                flush=True
+            )
+        
+            # -------------------------------------------------
+            # Save session
+            # -------------------------------------------------
+        
+            print(
+                "STEP I: Calling set_session for CONFIRM_MEDICATION...",
+                flush=True
             )
         
             set_session(
                 user_id,
                 "CONFIRM_MEDICATION",
                 session_data
+            )
+        
+            print(
+                "STEP J: set_session completed",
+                flush=True
+            )
+        
+            # -------------------------------------------------
+            # Send confirmation
+            # -------------------------------------------------
+        
+            print(
+                "STEP K: Calling send_message...",
+                flush=True
             )
         
             send_message(
@@ -5069,6 +5187,11 @@ def receive_message():
                     ["✅ ثبت دارو"],
                     ["❌ لغو"]
                 ]
+            )
+        
+            print(
+                "STEP L: send_message completed",
+                flush=True
             )
         
             return jsonify({
