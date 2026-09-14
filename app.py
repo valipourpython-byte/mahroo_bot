@@ -2429,7 +2429,9 @@ def save_medication(
     name,
     doses_per_day,
     number_of_doses,
-    times
+    times,
+    start_date=None,
+    end_date=None
 ):
 
     with get_db_connection() as conn:
@@ -2446,21 +2448,27 @@ def save_medication(
                     name,
                     doses_per_day,
                     number_of_doses,
-                    active
+                    active,
+                    start_date,
+                    end_date
                 )
                 VALUES (
                     %s,
                     %s,
                     %s,
                     %s,
-                    TRUE
+                    TRUE,
+                    %s,
+                    %s
                 )
                 RETURNING id
             """, (
                 user_id,
                 name,
                 doses_per_day,
-                number_of_doses
+                number_of_doses,
+                start_date,
+                end_date
             ))
 
             medication_id = (
@@ -2995,9 +3003,14 @@ def create_due_occurrences():
                     ON ms.medication_id = m.id
                 WHERE m.active = TRUE
                   AND ms.active = TRUE
-            """)
+                  AND (m.start_date IS NULL OR m.start_date <= %s)
+                  AND (m.end_date IS NULL OR m.end_date >= %s)
+            """, (
+                today,
+                today
+            ))
 
-            rows = cur.fetchall()
+rows = cur.fetchall()
 
             for row in rows:
 
@@ -5441,14 +5454,24 @@ def receive_message():
             # -------------------------------------------------
 
             set_session(
-
                 user_id,
-
-                "CONFIRM_MEDICATION",
-
+                "ASK_START_DATE",
                 session_data
-
             )
+            
+            send_message(
+                chat_id,
+            
+                "📅 تاریخ شروع مصرف دارو را وارد کنید.\n\n"
+                "مثلاً:\n"
+                "1405/06/20",
+            
+                MAIN_MENU_BUTTONS
+            )
+            
+            return jsonify({
+                "status": "ok"
+            })
 
             times_text = "\n".join(
 
@@ -5493,6 +5516,10 @@ def receive_message():
                 "status": "ok"
             })
 
+
+
+        
+        
         # =================================================
         # CONFIRM MEDICATION
         # =================================================
@@ -5519,7 +5546,9 @@ def receive_message():
 
                     times=session_data[
                         "times"
-                    ]
+                    ],
+                    start_date=session_data["start_date"],
+                    end_date=session_data["end_date"]
 
                 )
 
