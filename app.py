@@ -3094,7 +3094,7 @@ def create_due_occurrences():
                 today
             ))
 
-rows = cur.fetchall()
+            rows = cur.fetchall()
 
             for row in rows:
 
