@@ -4771,6 +4771,204 @@ def receive_message():
         
             return "", 200
 
+        # =========================
+        # PROFILE - BIRTH DATE
+        # =========================
+        
+        if state == "PROFILE_ASK_BIRTH_DATE":
+        
+            birth_date = parse_jalali_date(text.strip())
+        
+            if not birth_date:
+                send_message(
+                    chat_id,
+                    "❌ تاریخ واردشده معتبر نیست.\n\n"
+                    "لطفاً تاریخ تولد را به صورت شمسی وارد کنید.\n"
+                    "مثال:\n"
+                    "<code>1375/05/20</code>"
+                )
+                return "", 200
+        
+            session_data["birth_date"] = birth_date.isoformat()
+        
+            set_session(
+                user_id,
+                "PROFILE_ASK_GENDER",
+                session_data
+            )
+        
+            send_message(
+                chat_id,
+                "⚧ جنسیت خود را انتخاب کنید:",
+                keyboard=[
+                    ["👨 مرد"],
+                    ["👩 زن"],
+                    ["⚪ ترجیح می‌دهم نگویم"]
+                ]
+            )
+        
+            return "", 200
+
+
+
+
+
+        # =========================
+        # PROFILE - GENDER
+        # =========================
+        
+        if state == "PROFILE_ASK_GENDER":
+        
+            gender_map = {
+                "👨 مرد": "مرد",
+                "👩 زن": "زن",
+                "⚪ ترجیح می‌دهم نگویم": "ترجیح می‌دهم نگویم"
+            }
+        
+            if text not in gender_map:
+                send_message(
+                    chat_id,
+                    "لطفاً یکی از گزینه‌های موجود را انتخاب کنید:",
+                    keyboard=[
+                        ["👨 مرد"],
+                        ["👩 زن"],
+                        ["⚪ ترجیح می‌دهم نگویم"]
+                    ]
+                )
+                return "", 200
+        
+            session_data["gender"] = gender_map[text]
+        
+            set_session(
+                user_id,
+                "PROFILE_ASK_ALLERGIES",
+                session_data
+            )
+        
+            send_message(
+                chat_id,
+                "⚠️ آیا به دارو، غذا یا ماده خاصی حساسیت دارید؟\n\n"
+                "اگر حساسیت ندارید، بنویسید: <code>ندارم</code>"
+            )
+        
+            return "", 200
+        
+        # =========================
+        # PROFILE - ALLERGIES
+        # =========================
+        
+        if state == "PROFILE_ASK_ALLERGIES":
+        
+            allergies = text.strip()
+        
+            if not allergies:
+                send_message(
+                    chat_id,
+                    "لطفاً پاسخ خود را وارد کنید.\n"
+                    "اگر حساسیت ندارید، بنویسید: <code>ندارم</code>"
+                )
+                return "", 200
+        
+            session_data["allergies"] = allergies
+        
+            set_session(
+                user_id,
+                "PROFILE_ASK_MEDICAL_HISTORY",
+                session_data
+            )
+        
+            send_message(
+                chat_id,
+                "🩺 آیا سابقه بیماری مهم یا بیماری زمینه‌ای دارید؟\n\n"
+                "اگر ندارید، بنویسید: <code>ندارم</code>"
+            )
+        
+            return "", 200
+        # =========================
+        # PROFILE - MEDICAL HISTORY
+        # =========================
+        
+        if state == "PROFILE_ASK_MEDICAL_HISTORY":
+        
+            medical_history = text.strip()
+        
+            if not medical_history:
+                send_message(
+                    chat_id,
+                    "لطفاً پاسخ خود را وارد کنید.\n"
+                    "اگر سابقه بیماری ندارید، بنویسید: <code>ندارم</code>"
+                )
+                return "", 200
+        
+            session_data["medical_history"] = medical_history
+        
+            set_session(
+                user_id,
+                "PROFILE_ASK_IMPORTANT_NOTES",
+                session_data
+            )
+        
+            send_message(
+                chat_id,
+                "📝 آیا نکته پزشکی مهم دیگری وجود دارد که می‌خواهید در پروفایل شما ثبت شود؟\n\n"
+                "اگر موردی ندارید، بنویسید: <code>ندارم</code>"
+            )
+        
+            return "", 200
+        
+        # =========================
+        # PROFILE - CONFIRM
+        # =========================
+        
+        if state == "PROFILE_CONFIRM":
+        
+            if text == "✅ ثبت پروفایل":
+        
+                birth_date = datetime.strptime(
+                    session_data["birth_date"],
+                    "%Y-%m-%d"
+                ).date()
+        
+                save_patient_profile(
+                    user_id=user_id,
+                    full_name=session_data["full_name"],
+                    birth_date=birth_date,
+                    gender=session_data["gender"],
+                    allergies=session_data["allergies"],
+                    medical_history=session_data["medical_history"],
+                    important_notes=session_data["important_notes"]
+                )
+        
+                clear_session(user_id)
+        
+                send_message(
+                    chat_id,
+                    "✅ <b>پروفایل سلامت شما با موفقیت ثبت شد.</b>\n\n"
+                    "از این پس اطلاعات سلامت شما به حساب کاربری‌تان متصل خواهد بود.",
+                    keyboard=MAIN_MENU_BUTTONS
+                )
+        
+                return "", 200
+        
+            send_message(
+                chat_id,
+                "لطفاً برای ادامه، گزینه «✅ ثبت پروفایل» را انتخاب کنید "
+                "یا با «❌ لغو» عملیات را لغو کنید."
+            )
+        
+            return "", 200
+
+
+
+
+
+
+
+
+
+
+
+        
         
         # =================================================
         # DRUG SEARCH STATE
