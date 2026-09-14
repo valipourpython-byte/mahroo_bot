@@ -4569,7 +4569,9 @@ def receive_message():
         # MAIN MENU:
         # DASHBOARD
         # =================================================
-
+        if text == "👤 پروفایل سلامت من":
+            show_patient_profile(chat_id, user_id)
+            return "", 200
         if text == "📊 داشبورد من":
 
             medications = (
