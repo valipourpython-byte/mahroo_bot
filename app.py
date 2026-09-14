@@ -4916,7 +4916,7 @@ def receive_message():
         
             session_data[
                 "start_date"
-            ] = start_date
+            ] = start_date.isoformat()
         
             print(
                 "STEP E: session_data is now:",
@@ -4988,6 +4988,11 @@ def receive_message():
             start_date = session_data.get(
                 "start_date"
             )
+            if start_date:
+                start_date = datetime.strptime(
+                    start_date,
+                    "%Y-%m-%d"
+                ).date()
         
             if start_date is None:
         
