@@ -970,7 +970,37 @@ def schedule_to_datetime(
         tzinfo=IRAN_TZ
 
     )
+def parse_jalali_date(text):
+    """
+    دریافت تاریخ شمسی به فرمت YYYY/MM/DD
+    و تبدیل آن به تاریخ میلادی برای ذخیره در PostgreSQL.
+    """
+    try:
+        text = text.strip()
 
+        jalali_date = jdatetime.datetime.strptime(
+            text,
+            "%Y/%m/%d"
+        ).date()
+
+        return jalali_date.togregorian()
+
+    except Exception:
+        return None
+
+
+def format_jalali_date(gregorian_date):
+    """
+    تبدیل تاریخ میلادی به تاریخ شمسی برای نمایش به کاربر.
+    """
+    if not gregorian_date:
+        return None
+
+    jalali_date = jdatetime.date.fromgregorian(
+        date=gregorian_date
+    )
+
+    return jalali_date.strftime("%Y/%m/%d")
 
 # =========================================================
 # DRUG DATABASE
@@ -2433,6 +2463,60 @@ def save_medication(
     start_date=None,
     end_date=None
 ):
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+
+            cur.execute("""
+                INSERT INTO mahroo_medications (
+                    user_id,
+                    name,
+                    doses_per_day,
+                    number_of_doses,
+                    active,
+                    start_date,
+                    end_date
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    TRUE,
+                    %s,
+                    %s
+                )
+                RETURNING id
+            """, (
+                user_id,
+                name,
+                doses_per_day,
+                number_of_doses,
+                start_date,
+                end_date
+            ))
+
+            medication_id = cur.fetchone()[0]
+
+            for scheduled_time in times:
+                cur.execute("""
+                    INSERT INTO mahroo_medication_schedules (
+                        medication_id,
+                        scheduled_time,
+                        active
+                    )
+                    VALUES (
+                        %s,
+                        %s,
+                        TRUE
+                    )
+                """, (
+                    medication_id,
+                    scheduled_time
+                ))
+
+            conn.commit()
+
+    return medication_id
 
     with get_db_connection() as conn:
 
