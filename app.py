@@ -4176,16 +4176,17 @@ def receive_message():
         
         if state == "ASK_DRUG_SEARCH":
         
+            print(
+                "========== ENTERED DRUG SEARCH STATE ==========",
+                flush=True
+            )
+        
             if not text:
         
                 send_message(
-        
                     chat_id,
-        
                     "🔎 لطفاً نام دارو را وارد کنید.",
-        
                     MAIN_MENU_BUTTONS
-        
                 )
         
                 return jsonify({
@@ -4193,23 +4194,36 @@ def receive_message():
                 })
         
             try:
-
+        
                 # =================================================
-                # Resolve Persian / English / brand drug name
+                # STEP 1 — Resolve drug name
                 # =================================================
+        
+                print(
+                    "DRUG SEARCH STEP 1: Resolving drug name...",
+                    flush=True
+                )
         
                 resolved_name = resolve_drug_name(text)
         
                 print(
-                    "Resolved drug name:",
-                    resolved_name,
+                    "DRUG SEARCH STEP 1 RESULT:",
+                    repr(resolved_name),
                     flush=True
                 )
         
+                # =================================================
+                # STEP 2 — No drug found
+                # =================================================
+        
                 if not resolved_name:
         
-                    send_message(
+                    print(
+                        "DRUG SEARCH: No resolved drug name",
+                        flush=True
+                    )
         
+                    send_message(
                         chat_id,
         
                         f"❌ دارویی با نام "
@@ -4218,15 +4232,11 @@ def receive_message():
                         "لطفاً نام دارو را دوباره وارد کنید.",
         
                         MAIN_MENU_BUTTONS
-        
                     )
         
                     set_session(
-        
                         user_id,
-        
                         "ASK_DRUG_SEARCH"
-        
                     )
         
                     return jsonify({
@@ -4234,17 +4244,42 @@ def receive_message():
                     })
         
                 # =================================================
-                # Search database using resolved English name
+                # STEP 3 — Search database
                 # =================================================
+        
+                print(
+                    "DRUG SEARCH STEP 2: Calling search_drug_database...",
+                    flush=True
+                )
+        
+                print(
+                    "Search term:",
+                    repr(resolved_name),
+                    flush=True
+                )
         
                 drug = search_drug_database(
                     resolved_name
                 )
         
+                print(
+                    "DRUG SEARCH STEP 2 RESULT:",
+                    repr(drug),
+                    flush=True
+                )
+        
+                # =================================================
+                # STEP 4 — No database result
+                # =================================================
+        
                 if not drug:
         
-                    send_message(
+                    print(
+                        "DRUG SEARCH: Database returned no drug",
+                        flush=True
+                    )
         
+                    send_message(
                         chat_id,
         
                         f"❌ دارویی با نام "
@@ -4253,15 +4288,11 @@ def receive_message():
                         "لطفاً نام دارو را دوباره وارد کنید.",
         
                         MAIN_MENU_BUTTONS
-        
                     )
         
                     set_session(
-        
                         user_id,
-        
                         "ASK_DRUG_SEARCH"
-        
                     )
         
                     return jsonify({
@@ -4269,30 +4300,56 @@ def receive_message():
                     })
         
                 # =================================================
-                # Format result
+                # STEP 5 — Format result
                 # =================================================
+        
+                print(
+                    "DRUG SEARCH STEP 3: Formatting result...",
+                    flush=True
+                )
         
                 result_text = format_drug_result(
                     drug
                 )
         
-                send_message(
-        
-                    chat_id,
-        
-                    result_text,
-        
-                    MAIN_MENU_BUTTONS
-        
+                print(
+                    "DRUG SEARCH STEP 3 RESULT LENGTH:",
+                    len(result_text) if result_text else 0,
+                    flush=True
                 )
         
-                # Stay in search mode
+                # =================================================
+                # STEP 6 — Send result to Bale
+                # =================================================
+        
+                print(
+                    "DRUG SEARCH STEP 4: Sending result to Bale...",
+                    flush=True
+                )
+        
+                send_message(
+                    chat_id,
+                    result_text,
+                    MAIN_MENU_BUTTONS
+                )
+        
+                print(
+                    "DRUG SEARCH STEP 4: Bale send_message completed",
+                    flush=True
+                )
+        
+                # =================================================
+                # STEP 7 — Stay in search mode
+                # =================================================
+        
                 set_session(
-        
                     user_id,
-        
                     "ASK_DRUG_SEARCH"
+                )
         
+                print(
+                    "========== DRUG SEARCH COMPLETED ==========",
+                    flush=True
                 )
         
                 return jsonify({
@@ -4302,15 +4359,21 @@ def receive_message():
             except Exception as e:
         
                 print(
-        
-                    "Drug search error:",
-        
-                    repr(e)
-        
+                    "========== DRUG SEARCH ERROR ==========",
+                    flush=True
                 )
         
-                send_message(
+                print(
+                    "Drug search error:",
+                    repr(e),
+                    flush=True
+                )
         
+                import traceback
+        
+                traceback.print_exc()
+        
+                send_message(
                     chat_id,
         
                     "❌ هنگام جستجوی دارو "
@@ -4318,15 +4381,11 @@ def receive_message():
                     "لطفاً دوباره تلاش کنید.",
         
                     MAIN_MENU_BUTTONS
-        
                 )
         
                 set_session(
-        
                     user_id,
-        
                     "ASK_DRUG_SEARCH"
-        
                 )
         
                 return jsonify({
