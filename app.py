@@ -4871,9 +4871,30 @@ def receive_message():
         
         if state == "ASK_START_DATE":
         
+            print(
+                "========== ASK START DATE ENTERED ==========",
+                flush=True
+            )
+        
+            print(
+                "STEP A: Calling parse_jalali_date...",
+                flush=True
+            )
+        
             start_date = parse_jalali_date(text)
         
+            print(
+                "STEP B: parse_jalali_date returned:",
+                repr(start_date),
+                flush=True
+            )
+        
             if start_date is None:
+        
+                print(
+                    "STEP C: Date is invalid",
+                    flush=True
+                )
         
                 send_message(
                     chat_id,
@@ -4888,14 +4909,40 @@ def receive_message():
                     "status": "ok"
                 })
         
+            print(
+                "STEP D: Setting start_date in session_data...",
+                flush=True
+            )
+        
             session_data[
                 "start_date"
             ] = start_date
+        
+            print(
+                "STEP E: session_data is now:",
+                repr(session_data),
+                flush=True
+            )
+        
+            print(
+                "STEP F: Calling set_session for ASK_END_DATE...",
+                flush=True
+            )
         
             set_session(
                 user_id,
                 "ASK_END_DATE",
                 session_data
+            )
+        
+            print(
+                "STEP G: set_session completed successfully",
+                flush=True
+            )
+        
+            print(
+                "STEP H: Calling send_message...",
+                flush=True
             )
         
             send_message(
@@ -4907,10 +4954,14 @@ def receive_message():
                 MAIN_MENU_BUTTONS
             )
         
+            print(
+                "STEP I: send_message completed successfully",
+                flush=True
+            )
+        
             return jsonify({
                 "status": "ok"
             })
-
         # =================================================
         # ASK END DATE
         # =================================================
