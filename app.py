@@ -5574,7 +5574,105 @@ def receive_message():
                 "status": "ok"
             })
 
+            if state == "ASK_START_DATE":
 
+                text = user_text.strip()
+            
+                start_date = parse_jalali_date(text)
+            
+                if start_date is None:
+                    return send_message(
+                        chat_id,
+                        "❌ تاریخ واردشده معتبر نیست.\n\n"
+                        "لطفاً تاریخ را به شکل زیر وارد کنید:\n"
+                        "1405/06/20"
+                    )
+            
+                session["data"]["start_date"] = start_date
+            
+                session["state"] = "ASK_END_DATE"
+            
+                return send_message(
+                    chat_id,
+                    "📅 تاریخ پایان مصرف دارو را وارد کنید.\n\n"
+                    "فرمت:\n"
+                    "YYYY/MM/DD\n\n"
+                    "مثال:\n"
+                    "1405/07/20"
+                )
+
+            if state == "ASK_END_DATE":
+
+                text = user_text.strip()
+            
+                end_date = parse_jalali_date(text)
+            
+                if end_date is None:
+                    return send_message(
+                        chat_id,
+                        "❌ تاریخ واردشده معتبر نیست.\n\n"
+                        "لطفاً تاریخ را به شکل زیر وارد کنید:\n"
+                        "1405/07/20"
+                    )
+            
+                start_date = session["data"].get("start_date")
+            
+                if start_date is None:
+                    session["state"] = "ASK_START_DATE"
+            
+                    return send_message(
+                        chat_id,
+                        "❌ تاریخ شروع ثبت نشده است.\n\n"
+                        "لطفاً تاریخ شروع مصرف را وارد کنید:"
+                    )
+            
+                if end_date < start_date:
+                    return send_message(
+                        chat_id,
+                        "❌ تاریخ پایان نمی‌تواند قبل از تاریخ شروع باشد.\n\n"
+                        "لطفاً تاریخ پایان را دوباره وارد کنید:"
+                    )
+            
+                session["data"]["end_date"] = end_date
+            
+                session["state"] = "CONFIRM_MEDICATION"
+            
+                start_jalali = format_jalali_date(start_date)
+                end_jalali = format_jalali_date(end_date)
+            
+                name = session["data"]["medication_name"]
+                doses_per_day = session["data"]["doses_per_day"]
+                number_of_doses = session["data"]["number_of_doses"]
+                times = session["data"]["times"]
+            
+                times_text = "\n".join(
+                    f"• {time}"
+                    for time in times
+                )
+            
+                confirmation_text = (
+                    "💊 اطلاعات دارو\n\n"
+                    f"نام دارو: {name}\n"
+                    f"تعداد دفعات مصرف در روز: {doses_per_day}\n"
+                    f"تعداد کل دوزها: {number_of_doses}\n\n"
+                    f"⏰ زمان‌های مصرف:\n"
+                    f"{times_text}\n\n"
+                    f"📅 تاریخ شروع: {start_jalali}\n"
+                    f"📅 تاریخ پایان: {end_jalali}\n\n"
+                    "اگر اطلاعات درست است، روی «✅ ثبت دارو» بزنید."
+                )
+
+                return send_message(
+                    chat_id,
+                    confirmation_text,
+                    reply_markup={
+                        "keyboard": [
+                            ["✅ ثبت دارو"],
+                            ["❌ لغو"]
+                        ],
+                        "resize_keyboard": True
+                    }
+                )
         
         
         # =================================================
