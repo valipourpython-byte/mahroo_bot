@@ -3621,7 +3621,227 @@ def receive_message():
                 "status": "ok"
             })
 
-       
+       # =================================================
+        # DRUG SEARCH STATE
+        # =================================================
+        
+        if state == "ASK_DRUG_SEARCH":
+        
+            print(
+                "========== ENTERED DRUG SEARCH STATE ==========",
+                flush=True
+            )
+        
+            if not text:
+        
+                send_message(
+                    chat_id,
+                    "🔎 لطفاً نام دارو را وارد کنید.",
+                    MAIN_MENU_BUTTONS
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            try:
+        
+                # =================================================
+                # STEP 1 — Resolve drug name
+                # =================================================
+        
+                print(
+                    "DRUG SEARCH STEP 1: Resolving drug name...",
+                    flush=True
+                )
+        
+                resolved_name = resolve_drug_name(text)
+        
+                print(
+                    "DRUG SEARCH STEP 1 RESULT:",
+                    repr(resolved_name),
+                    flush=True
+                )
+        
+                # =================================================
+                # STEP 2 — No drug found
+                # =================================================
+        
+                if not resolved_name:
+        
+                    print(
+                        "DRUG SEARCH: No resolved drug name",
+                        flush=True
+                    )
+        
+                    send_message(
+                        chat_id,
+        
+                        f"❌ دارویی با نام "
+                        f"«{text}» در پایگاه داده "
+                        "پیدا نشد.\n\n"
+                        "لطفاً نام دارو را دوباره وارد کنید.",
+        
+                        MAIN_MENU_BUTTONS
+                    )
+        
+                    set_session(
+                        user_id,
+                        "ASK_DRUG_SEARCH"
+                    )
+        
+                    return jsonify({
+                        "status": "ok"
+                    })
+        
+                # =================================================
+                # STEP 3 — Search database
+                # =================================================
+        
+                print(
+                    "DRUG SEARCH STEP 2: Calling search_drug_database...",
+                    flush=True
+                )
+        
+                print(
+                    "Search term:",
+                    repr(resolved_name),
+                    flush=True
+                )
+        
+                drug = search_drug_database(
+                    resolved_name
+                )
+        
+                print(
+                    "DRUG SEARCH STEP 2 RESULT:",
+                    repr(drug),
+                    flush=True
+                )
+        
+                # =================================================
+                # STEP 4 — No database result
+                # =================================================
+        
+                if not drug:
+        
+                    print(
+                        "DRUG SEARCH: Database returned no drug",
+                        flush=True
+                    )
+        
+                    send_message(
+                        chat_id,
+        
+                        f"❌ دارویی با نام "
+                        f"«{text}» در پایگاه داده "
+                        "پیدا نشد.\n\n"
+                        "لطفاً نام دارو را دوباره وارد کنید.",
+        
+                        MAIN_MENU_BUTTONS
+                    )
+        
+                    set_session(
+                        user_id,
+                        "ASK_DRUG_SEARCH"
+                    )
+        
+                    return jsonify({
+                        "status": "ok"
+                    })
+        
+                # =================================================
+                # STEP 5 — Format result
+                # =================================================
+        
+                print(
+                    "DRUG SEARCH STEP 3: Formatting result...",
+                    flush=True
+                )
+        
+                result_text = format_drug_result(
+                    drug
+                )
+        
+                print(
+                    "DRUG SEARCH STEP 3 RESULT LENGTH:",
+                    len(result_text) if result_text else 0,
+                    flush=True
+                )
+        
+                # =================================================
+                # STEP 6 — Send result to Bale
+                # =================================================
+        
+                print(
+                    "DRUG SEARCH STEP 4: Sending result to Bale...",
+                    flush=True
+                )
+        
+                send_message(
+                    chat_id,
+                    result_text,
+                    MAIN_MENU_BUTTONS
+                )
+        
+                print(
+                    "DRUG SEARCH STEP 4: Bale send_message completed",
+                    flush=True
+                )
+        
+                # =================================================
+                # STEP 7 — Stay in search mode
+                # =================================================
+        
+                set_session(
+                    user_id,
+                    "ASK_DRUG_SEARCH"
+                )
+        
+                print(
+                    "========== DRUG SEARCH COMPLETED ==========",
+                    flush=True
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            except Exception as e:
+        
+                print(
+                    "========== DRUG SEARCH ERROR ==========",
+                    flush=True
+                )
+        
+                print(
+                    "Drug search error:",
+                    repr(e),
+                    flush=True
+                )
+        
+                import traceback
+        
+                traceback.print_exc()
+        
+                send_message(
+                    chat_id,
+        
+                    "❌ هنگام جستجوی دارو "
+                    "خطایی رخ داد.\n\n"
+                    "لطفاً دوباره تلاش کنید.",
+        
+                    MAIN_MENU_BUTTONS
+                )
+        
+                set_session(
+                    user_id,
+                    "ASK_DRUG_SEARCH"
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
         
         # =================================================
         # AI DRUG QUESTION STATE
@@ -3934,463 +4154,243 @@ def receive_message():
                 flush=True
             )
     
-        # =================================================
-        # STEP 1 — Direct database search
-        # =================================================
-    
-        try:
-    
-            drug = search_drug_database(text)
-    
-            if drug:
-    
-                print(
-                    "Drug resolver: direct match found:",
-                    text,
-                    flush=True
-                )
-    
-                return text
-    
-        except Exception as e:
-    
-            print(
-                "Drug resolver direct search error:",
-                repr(e),
-                flush=True
-            )
-    
-        # =================================================
-        # STEP 2 — Ask LLM to identify generic drug name
-        # =================================================
-    
-        try:
-    
-            prompt = f"""
-    You are a drug-name normalization system.
-    
-    Identify the generic English name of the drug in the user input.
-    
-    The input may be:
-    - Persian drug name
-    - English drug name
-    - brand name
-    - misspelled drug name
-    
-    IMPORTANT:
-    Return ONLY the generic drug name in English.
-    
-    Examples:
-    
-    Input: اسپرین
-    Output: aspirin
-    
-    Input: آسپرین
-    Output: aspirin
-    
-    Input: پاراستامول
-    Output: acetaminophen
-    
-    Input: استامینوفن
-    Output: acetaminophen
-    
-    Input: ایبوپروفن
-    Output: ibuprofen
-    
-    Input: وارفارین
-    Output: warfarin
-    
-    Input: Tylenol
-    Output: acetaminophen
-    
-    Do not write a sentence.
-    Do not explain.
-    Do not use Persian.
-    Do not include parentheses.
-    Do not include dosage.
-    Do not include strength.
-    Do not include dosage form.
-    Do not provide alternatives.
-    
-    If the input is not a drug or cannot be identified confidently, return:
-    
-    UNKNOWN
-    
-    User input:
-    {text}
-    """
-    
-            response = ask_llm(prompt)
-    
-            if not response:
-    
-                print(
-                    "Drug resolver: LLM returned empty response",
-                    flush=True
-                )
-    
-                return None
-    
-            resolved_name = response.strip()
-    
-            print(
-                "Drug resolver raw LLM result:",
-                resolved_name,
-                flush=True
-            )
-    
-            if not resolved_name:
-                return None
-    
             # =================================================
-            # STEP 3 — Clean common LLM response patterns
+            # STEP 1 — Direct database search
             # =================================================
-    
-            import re
-    
-            # Remove markdown/code formatting
-            resolved_name = resolved_name.replace(
-                "```",
-                ""
-            ).strip()
-    
-            # If model returned something like:
-            # اسم علمی این دارو آسپرین (Aspirin) است.
-            #
-            # extract the English text inside parentheses first.
-    
-            parentheses_match = re.search(
-                r"\(([A-Za-z][A-Za-z0-9\-\s]*)\)",
-                resolved_name
-            )
-    
-            if parentheses_match:
-    
-                candidate = parentheses_match.group(
-                    1
-                ).strip()
-    
-                if candidate:
-    
-                    resolved_name = candidate
-    
-            else:
-    
-                # Try to extract an English drug name
-                # from the response.
-    
-                english_matches = re.findall(
-                    r"\b[A-Za-z][A-Za-z0-9\-]*(?:\s+[A-Za-z][A-Za-z0-9\-]*){0,3}\b",
-                    resolved_name
-                )
-    
-                if english_matches:
-    
-                    # Prefer the shortest reasonable English
-                    # candidate because generic drug names are
-                    # normally short.
-    
-                    candidates = [
-                        x.strip()
-                        for x in english_matches
-                        if x.strip()
-                    ]
-    
-                    if candidates:
-    
-                        resolved_name = candidates[-1]
-    
-            resolved_name = resolved_name.strip(
-                " \t\n\r.,:;\"'`"
-            )
-    
-            print(
-                "Drug resolver cleaned result:",
-                resolved_name,
-                flush=True
-            )
-    
-            if not resolved_name:
-                return None
-    
-            if resolved_name.upper() == "UNKNOWN":
-                return None
-    
-            # =================================================
-            # STEP 4 — Validate against drugs table
-            # =================================================
-    
-            with get_db_connection() as conn:
-    
-                with conn.cursor() as cur:
-    
-                    cur.execute(
-                        """
-                        SELECT generic_name
-                        FROM drugs
-                        WHERE LOWER(generic_name)
-                              LIKE LOWER(%s)
-                        ORDER BY LENGTH(generic_name) ASC
-                        LIMIT 1;
-                        """,
-                        (
-                            resolved_name + "%",
-                        )
-                    )
-    
-                    row = cur.fetchone()
-    
-                    if not row:
-    
-                        print(
-                            "Drug resolver: LLM result not found in DB:",
-                            resolved_name,
-                            flush=True
-                        )
-    
-                        return None
-    
-                    canonical_name = row[0]
-    
-                    print(
-                        "Drug resolver: validated DB match:",
-                        canonical_name,
-                        flush=True
-                    )
-    
-                    return resolved_name
-    
-        except Exception as e:
-    
-            print(
-                "Drug resolver LLM error:",
-                repr(e),
-                flush=True
-            )
-    
-            return None
-
-        # =================================================
-        # DRUG SEARCH STATE
-        # =================================================
-        
-        if state == "ASK_DRUG_SEARCH":
-        
-            print(
-                "========== ENTERED DRUG SEARCH STATE ==========",
-                flush=True
-            )
-        
-            if not text:
-        
-                send_message(
-                    chat_id,
-                    "🔎 لطفاً نام دارو را وارد کنید.",
-                    MAIN_MENU_BUTTONS
-                )
-        
-                return jsonify({
-                    "status": "ok"
-                })
         
             try:
         
-                # =================================================
-                # STEP 1 — Resolve drug name
-                # =================================================
+                drug = search_drug_database(text)
         
-                print(
-                    "DRUG SEARCH STEP 1: Resolving drug name...",
-                    flush=True
-                )
-        
-                resolved_name = resolve_drug_name(text)
-        
-                print(
-                    "DRUG SEARCH STEP 1 RESULT:",
-                    repr(resolved_name),
-                    flush=True
-                )
-        
-                # =================================================
-                # STEP 2 — No drug found
-                # =================================================
-        
-                if not resolved_name:
+                if drug:
         
                     print(
-                        "DRUG SEARCH: No resolved drug name",
+                        "Drug resolver: direct match found:",
+                        text,
                         flush=True
                     )
         
-                    send_message(
-                        chat_id,
-        
-                        f"❌ دارویی با نام "
-                        f"«{text}» در پایگاه داده "
-                        "پیدا نشد.\n\n"
-                        "لطفاً نام دارو را دوباره وارد کنید.",
-        
-                        MAIN_MENU_BUTTONS
-                    )
-        
-                    set_session(
-                        user_id,
-                        "ASK_DRUG_SEARCH"
-                    )
-        
-                    return jsonify({
-                        "status": "ok"
-                    })
-        
-                # =================================================
-                # STEP 3 — Search database
-                # =================================================
-        
-                print(
-                    "DRUG SEARCH STEP 2: Calling search_drug_database...",
-                    flush=True
-                )
-        
-                print(
-                    "Search term:",
-                    repr(resolved_name),
-                    flush=True
-                )
-        
-                drug = search_drug_database(
-                    resolved_name
-                )
-        
-                print(
-                    "DRUG SEARCH STEP 2 RESULT:",
-                    repr(drug),
-                    flush=True
-                )
-        
-                # =================================================
-                # STEP 4 — No database result
-                # =================================================
-        
-                if not drug:
-        
-                    print(
-                        "DRUG SEARCH: Database returned no drug",
-                        flush=True
-                    )
-        
-                    send_message(
-                        chat_id,
-        
-                        f"❌ دارویی با نام "
-                        f"«{text}» در پایگاه داده "
-                        "پیدا نشد.\n\n"
-                        "لطفاً نام دارو را دوباره وارد کنید.",
-        
-                        MAIN_MENU_BUTTONS
-                    )
-        
-                    set_session(
-                        user_id,
-                        "ASK_DRUG_SEARCH"
-                    )
-        
-                    return jsonify({
-                        "status": "ok"
-                    })
-        
-                # =================================================
-                # STEP 5 — Format result
-                # =================================================
-        
-                print(
-                    "DRUG SEARCH STEP 3: Formatting result...",
-                    flush=True
-                )
-        
-                result_text = format_drug_result(
-                    drug
-                )
-        
-                print(
-                    "DRUG SEARCH STEP 3 RESULT LENGTH:",
-                    len(result_text) if result_text else 0,
-                    flush=True
-                )
-        
-                # =================================================
-                # STEP 6 — Send result to Bale
-                # =================================================
-        
-                print(
-                    "DRUG SEARCH STEP 4: Sending result to Bale...",
-                    flush=True
-                )
-        
-                send_message(
-                    chat_id,
-                    result_text,
-                    MAIN_MENU_BUTTONS
-                )
-        
-                print(
-                    "DRUG SEARCH STEP 4: Bale send_message completed",
-                    flush=True
-                )
-        
-                # =================================================
-                # STEP 7 — Stay in search mode
-                # =================================================
-        
-                set_session(
-                    user_id,
-                    "ASK_DRUG_SEARCH"
-                )
-        
-                print(
-                    "========== DRUG SEARCH COMPLETED ==========",
-                    flush=True
-                )
-        
-                return jsonify({
-                    "status": "ok"
-                })
+                    return text
         
             except Exception as e:
         
                 print(
-                    "========== DRUG SEARCH ERROR ==========",
-                    flush=True
-                )
-        
-                print(
-                    "Drug search error:",
+                    "Drug resolver direct search error:",
                     repr(e),
                     flush=True
                 )
         
-                import traceback
+            # =================================================
+            # STEP 2 — Ask LLM to identify generic drug name
+            # =================================================
         
-                traceback.print_exc()
+            try:
         
-                send_message(
-                    chat_id,
+                prompt = f"""
+        You are a drug-name normalization system.
         
-                    "❌ هنگام جستجوی دارو "
-                    "خطایی رخ داد.\n\n"
-                    "لطفاً دوباره تلاش کنید.",
+        Identify the generic English name of the drug in the user input.
         
-                    MAIN_MENU_BUTTONS
+        The input may be:
+        - Persian drug name
+        - English drug name
+        - brand name
+        - misspelled drug name
+        
+        IMPORTANT:
+        Return ONLY the generic drug name in English.
+        
+        Examples:
+        
+        Input: اسپرین
+        Output: aspirin
+        
+        Input: آسپرین
+        Output: aspirin
+        
+        Input: پاراستامول
+        Output: acetaminophen
+        
+        Input: استامینوفن
+        Output: acetaminophen
+        
+        Input: ایبوپروفن
+        Output: ibuprofen
+        
+        Input: وارفارین
+        Output: warfarin
+        
+        Input: Tylenol
+        Output: acetaminophen
+        
+        Do not write a sentence.
+        Do not explain.
+        Do not use Persian.
+        Do not include parentheses.
+        Do not include dosage.
+        Do not include strength.
+        Do not include dosage form.
+        Do not provide alternatives.
+        
+        If the input is not a drug or cannot be identified confidently, return:
+        
+        UNKNOWN
+        
+        User input:
+        {text}
+        """
+        
+                response = ask_llm(prompt)
+        
+                if not response:
+        
+                    print(
+                        "Drug resolver: LLM returned empty response",
+                        flush=True
+                    )
+        
+                    return None
+        
+                resolved_name = response.strip()
+        
+                print(
+                    "Drug resolver raw LLM result:",
+                    resolved_name,
+                    flush=True
                 )
         
-                set_session(
-                    user_id,
-                    "ASK_DRUG_SEARCH"
+                if not resolved_name:
+                    return None
+        
+                # =================================================
+                # STEP 3 — Clean common LLM response patterns
+                # =================================================
+        
+                import re
+        
+                # Remove markdown/code formatting
+                resolved_name = resolved_name.replace(
+                    "```",
+                    ""
+                ).strip()
+        
+                # If model returned something like:
+                # اسم علمی این دارو آسپرین (Aspirin) است.
+                #
+                # extract the English text inside parentheses first.
+        
+                parentheses_match = re.search(
+                    r"\(([A-Za-z][A-Za-z0-9\-\s]*)\)",
+                    resolved_name
                 )
         
-                return jsonify({
-                    "status": "ok"
-                })
+                if parentheses_match:
+        
+                    candidate = parentheses_match.group(
+                        1
+                    ).strip()
+        
+                    if candidate:
+        
+                        resolved_name = candidate
+        
+                else:
+        
+                    # Try to extract an English drug name
+                    # from the response.
+        
+                    english_matches = re.findall(
+                        r"\b[A-Za-z][A-Za-z0-9\-]*(?:\s+[A-Za-z][A-Za-z0-9\-]*){0,3}\b",
+                        resolved_name
+                    )
+        
+                    if english_matches:
+        
+                        # Prefer the shortest reasonable English
+                        # candidate because generic drug names are
+                        # normally short.
+        
+                        candidates = [
+                            x.strip()
+                            for x in english_matches
+                            if x.strip()
+                        ]
+        
+                        if candidates:
+        
+                            resolved_name = candidates[-1]
+        
+                resolved_name = resolved_name.strip(
+                    " \t\n\r.,:;\"'`"
+                )
+        
+                print(
+                    "Drug resolver cleaned result:",
+                    resolved_name,
+                    flush=True
+                )
+        
+                if not resolved_name:
+                    return None
+        
+                if resolved_name.upper() == "UNKNOWN":
+                    return None
+        
+                # =================================================
+                # STEP 4 — Validate against drugs table
+                # =================================================
+        
+                with get_db_connection() as conn:
+        
+                    with conn.cursor() as cur:
+        
+                        cur.execute(
+                            """
+                            SELECT generic_name
+                            FROM drugs
+                            WHERE LOWER(generic_name)
+                                  LIKE LOWER(%s)
+                            ORDER BY LENGTH(generic_name) ASC
+                            LIMIT 1;
+                            """,
+                            (
+                                resolved_name + "%",
+                            )
+                        )
+        
+                        row = cur.fetchone()
+        
+                        if not row:
+        
+                            print(
+                                "Drug resolver: LLM result not found in DB:",
+                                resolved_name,
+                                flush=True
+                            )
+        
+                            return None
+        
+                        canonical_name = row[0]
+        
+                        print(
+                            "Drug resolver: validated DB match:",
+                            canonical_name,
+                            flush=True
+                        )
+        
+                        return resolved_name
+        
+            except Exception as e:
+        
+                print(
+                    "Drug resolver LLM error:",
+                    repr(e),
+                    flush=True
+                )
+        
+                return None
+
+        
         # =================================================
         # MEDICATION LIST STATE
         # =================================================
