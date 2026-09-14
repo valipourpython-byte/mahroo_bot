@@ -5465,6 +5465,8 @@ def receive_message():
                 "status": "ok"
             })
 
+        
+       
         # =================================================
         # ASK TIME
         # =================================================
@@ -5537,69 +5539,40 @@ def receive_message():
             # All times collected
             # -------------------------------------------------
 
+            session_data[
+                "start_date"
+            ] = None
+
+            session_data[
+                "end_date"
+            ] = None
+
             set_session(
+
                 user_id,
+
                 "ASK_START_DATE",
+
                 session_data
+
             )
-            
+
             send_message(
+
                 chat_id,
-            
+
                 "📅 تاریخ شروع مصرف دارو را وارد کنید.\n\n"
-                "مثلاً:\n"
-                "1405/06/20",
-            
+                "لطفاً تاریخ را به صورت زیر وارد کنید:\n"
+                "YYYY/MM/DD\n\n"
+                "مثلاً: 1405/06/20",
+
                 MAIN_MENU_BUTTONS
-            )
-            
-            return jsonify({
-                "status": "ok"
-            })
-
-            times_text = "\n".join(
-
-                f"• {time}"
-
-                for time
-                in session_data["times"]
-
-            )
-
-            send_message(
-
-                chat_id,
-
-                "💊 اطلاعات دارو:\n\n"
-
-                f"نام: "
-                f"{session_data['medication_name']}\n"
-
-                f"دفعات روزانه: "
-                f"{session_data['doses_per_day']}\n"
-
-                f"تعداد دوز: "
-                f"{session_data['number_of_doses']}\n\n"
-
-                f"⏰ زمان‌ها:\n"
-                f"{times_text}\n\n"
-
-                "آیا اطلاعات صحیح است؟",
-
-                [
-
-                    ["✅ ثبت دارو"],
-
-                    ["❌ لغو"]
-
-                ]
 
             )
 
             return jsonify({
                 "status": "ok"
             })
-
 
 
         
