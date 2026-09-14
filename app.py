@@ -3919,12 +3919,8 @@ def receive_message():
         # =================================================
         def resolve_drug_name(text):
             """
-            تبدیل نام دارو به نام انگلیسی قابل جستجو در دیتابیس.
-        
-            روند:
-            1) جستجوی مستقیم عبارت واردشده
-            2) در صورت عدم یافتن، تشخیص نام ژنریک انگلیسی توسط LLM
-            3) اعتبارسنجی نتیجه LLM در جدول drugs
+            Resolve Persian / English / brand / misspelled drug names
+            to a validated English generic drug name.
             """
         
             text = clean_drug_text(text)
@@ -3932,7 +3928,11 @@ def receive_message():
             if not text:
                 return None
         
-            print("Drug resolver input:", text, flush=True)
+            print(
+                "Drug resolver input:",
+                text,
+                flush=True
+            )
     
         # =================================================
         # STEP 1 — Direct database search
@@ -3961,35 +3961,60 @@ def receive_message():
             )
     
         # =================================================
-        # STEP 2 — Ask LLM ONLY for drug name
+        # STEP 2 — Ask LLM to identify generic drug name
         # =================================================
     
         try:
     
             prompt = f"""
-    You are a drug-name normalization assistant.
+    You are a drug-name normalization system.
     
-    Your ONLY task is to identify the generic drug name
-    corresponding to the user's input.
+    Identify the generic English name of the drug in the user input.
     
-    The user may write:
-    - a Persian drug name
-    - an English drug name
-    - a brand name
-    - a misspelled drug name
+    The input may be:
+    - Persian drug name
+    - English drug name
+    - brand name
+    - misspelled drug name
     
-    Return ONLY the generic English drug name.
+    IMPORTANT:
+    Return ONLY the generic drug name in English.
     
-    Rules:
-    - Do NOT provide medical information.
-    - Do NOT explain anything.
-    - Do NOT provide dosage.
-    - Do NOT provide strength.
-    - Do NOT provide dosage form.
-    - Do NOT return multiple alternatives.
-    - Do NOT write sentences.
-    - Return only the generic drug name in English.
-    - If you cannot confidently identify a drug, return: UNKNOWN
+    Examples:
+    
+    Input: اسپرین
+    Output: aspirin
+    
+    Input: آسپرین
+    Output: aspirin
+    
+    Input: پاراستامول
+    Output: acetaminophen
+    
+    Input: استامینوفن
+    Output: acetaminophen
+    
+    Input: ایبوپروفن
+    Output: ibuprofen
+    
+    Input: وارفارین
+    Output: warfarin
+    
+    Input: Tylenol
+    Output: acetaminophen
+    
+    Do not write a sentence.
+    Do not explain.
+    Do not use Persian.
+    Do not include parentheses.
+    Do not include dosage.
+    Do not include strength.
+    Do not include dosage form.
+    Do not provide alternatives.
+    
+    If the input is not a drug or cannot be identified confidently, return:
+    
+    UNKNOWN
     
     User input:
     {text}
@@ -4009,7 +4034,78 @@ def receive_message():
             resolved_name = response.strip()
     
             print(
-                "Drug resolver LLM result:",
+                "Drug resolver raw LLM result:",
+                resolved_name,
+                flush=True
+            )
+    
+            if not resolved_name:
+                return None
+    
+            # =================================================
+            # STEP 3 — Clean common LLM response patterns
+            # =================================================
+    
+            import re
+    
+            # Remove markdown/code formatting
+            resolved_name = resolved_name.replace(
+                "```",
+                ""
+            ).strip()
+    
+            # If model returned something like:
+            # اسم علمی این دارو آسپرین (Aspirin) است.
+            #
+            # extract the English text inside parentheses first.
+    
+            parentheses_match = re.search(
+                r"\(([A-Za-z][A-Za-z0-9\-\s]*)\)",
+                resolved_name
+            )
+    
+            if parentheses_match:
+    
+                candidate = parentheses_match.group(
+                    1
+                ).strip()
+    
+                if candidate:
+    
+                    resolved_name = candidate
+    
+            else:
+    
+                # Try to extract an English drug name
+                # from the response.
+    
+                english_matches = re.findall(
+                    r"\b[A-Za-z][A-Za-z0-9\-]*(?:\s+[A-Za-z][A-Za-z0-9\-]*){0,3}\b",
+                    resolved_name
+                )
+    
+                if english_matches:
+    
+                    # Prefer the shortest reasonable English
+                    # candidate because generic drug names are
+                    # normally short.
+    
+                    candidates = [
+                        x.strip()
+                        for x in english_matches
+                        if x.strip()
+                    ]
+    
+                    if candidates:
+    
+                        resolved_name = candidates[-1]
+    
+            resolved_name = resolved_name.strip(
+                " \t\n\r.,:;\"'`"
+            )
+    
+            print(
+                "Drug resolver cleaned result:",
                 resolved_name,
                 flush=True
             )
@@ -4020,13 +4116,8 @@ def receive_message():
             if resolved_name.upper() == "UNKNOWN":
                 return None
     
-            # Remove accidental surrounding quotes
-            resolved_name = resolved_name.strip(
-                "\"'` "
-            )
-    
             # =================================================
-            # STEP 3 — Validate LLM result against drugs table
+            # STEP 4 — Validate against drugs table
             # =================================================
     
             with get_db_connection() as conn:
@@ -4062,7 +4153,7 @@ def receive_message():
                     canonical_name = row[0]
     
                     print(
-                        "Drug resolver: validated:",
+                        "Drug resolver: validated DB match:",
                         canonical_name,
                         flush=True
                     )
@@ -4078,8 +4169,6 @@ def receive_message():
             )
     
             return None
-
-
 
         # =================================================
         # DRUG SEARCH STATE
