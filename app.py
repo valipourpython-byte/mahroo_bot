@@ -4566,6 +4566,85 @@ def receive_message():
         
             state = "MAIN_MENU"
 
+
+        # =================================================
+        # PRESCRIPTION IMAGE
+        # =================================================
+        
+        if state == "PRESCRIPTION_IMAGE":
+        
+            # بررسی اینکه پیام شامل عکس است
+            photo = message.get("photo")
+        
+            if not photo:
+        
+                send_message(
+                    chat_id,
+                    "❌ لطفاً یک عکس از نسخه ارسال کنید.\n\n"
+                    "برای ادامه، عکس نسخه را به صورت تصویر ارسال کنید."
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            # انتخاب بزرگ‌ترین سایز عکس
+            largest_photo = photo[-1]
+        
+            file_id = largest_photo.get("file_id")
+        
+            print(
+                "========== PRESCRIPTION IMAGE ==========",
+                flush=True
+            )
+        
+            print(
+                "PHOTO:",
+                repr(photo),
+                flush=True
+            )
+        
+            print(
+                "FILE ID:",
+                repr(file_id),
+                flush=True
+            )
+        
+            print(
+                "========================================",
+                flush=True
+            )
+        
+            if not file_id:
+        
+                send_message(
+                    chat_id,
+                    "❌ دریافت تصویر نسخه با مشکل مواجه شد.\n"
+                    "لطفاً دوباره عکس را ارسال کنید."
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            # ذخیره موقت file_id در session
+            session_data["prescription_file_id"] = file_id
+        
+            set_session(
+                user_id,
+                "PRESCRIPTION_IMAGE_RECEIVED",
+                session_data
+            )
+        
+            send_message(
+                chat_id,
+                "✅ تصویر نسخه با موفقیت دریافت شد.\n\n"
+                "در مرحله بعد، اطلاعات داروهای داخل نسخه استخراج خواهد شد."
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
         # =================================================
         # MAIN MENU:
         # DASHBOARD
