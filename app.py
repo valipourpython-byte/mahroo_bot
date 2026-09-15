@@ -6498,36 +6498,39 @@ def receive_message():
                     )
         
                     if medication["end_date"]:
-        
+
                         medication_end_date = (
                             datetime.strptime(
                                 medication["end_date"],
                                 "%Y-%m-%d"
                             ).date()
                         )
-        
+                    
+                        end_date_text = format_jalali_date(
+                            medication_end_date
+                        )
+                    
                         message += (
                             f"  📅 تا تاریخ: "
-                            f"{format_jalali_date("
-                            f"medication_end_date"
-                            f")}\n"
+                            f"{end_date_text}\n"
                         )
-        
+                    
                     else:
-        
+                    
                         message += (
                             "  📅 مدت مصرف: "
                             "در نسخه مشخص نشده\n"
                         )
-        
+                    
                     message += "\n"
+                    
+                    message += (
+                        "🔔 یادآوری‌های مصرف دارو برای شما فعال شد.\n\n"
+                        "⚠️ زمان‌های بالا زمان‌های پیشنهادی اولیه سیستم هستند. "
+                        "در مرحله بعد امکان تغییر زمان مصرف هر دارو را اضافه می‌کنیم."
+                    )
         
-                message += (
-                    "🔔 یادآوری‌های مصرف دارو برای شما فعال شد.\n\n"
-                    "⚠️ زمان‌های بالا زمان‌های پیشنهادی اولیه سیستم هستند. "
-                    "در مرحله بعد امکان تغییر زمان مصرف هر دارو را اضافه می‌کنیم."
-                )
-        
+                        
                 send_message(
                     chat_id,
                     message,
