@@ -1022,7 +1022,7 @@ def show_patient_profile(chat_id, user_id):
     send_message(
         chat_id,
         message,
-        keyboard=[
+        [
             ["✏️ ویرایش پروفایل"],
             ["↩️ منوی اصلی"]
         ]
@@ -5012,7 +5012,7 @@ def receive_message():
                     chat_id,
                     "✅ <b>پروفایل سلامت شما با موفقیت ثبت شد.</b>\n\n"
                     "از این پس اطلاعات سلامت شما به حساب کاربری‌تان متصل خواهد بود.",
-                    keyboard=MAIN_MENU_BUTTONS
+                    MAIN_MENU_BUTTONS
                 )
         
                 return "", 200
