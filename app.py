@@ -1375,15 +1375,15 @@ def normalize_prescription_medications(
         system_prompt = """
 تو یک سامانه نرمال‌سازی نام دارو برای ربات «مهرو» هستی.
 
-وظیفه تو فقط تبدیل نام داروها به نام فارسی قابل فهم برای کاربر است.
+وظیفه تو فقط تبدیل نام دارو به یک نام فارسی، طبیعی و قابل فهم برای کاربر است.
 
 قوانین بسیار مهم:
 
-1. فقط نام دارو را ترجمه یا نرمال کن.
+1. فقط نام دارو را نرمال و فارسی کن.
 
-2. دوز دارو را تغییر نده.
+2. ماده مؤثره دارو را تغییر نده.
 
-3. ماده مؤثره دارو را تغییر نده.
+3. دوز دارو را تغییر نده.
 
 4. تعداد دفعات مصرف را تغییر نده.
 
@@ -1391,25 +1391,36 @@ def normalize_prescription_medications(
 
 6. دستور مصرف را تغییر نده.
 
-7. اگر نام تجاری و ماده مؤثره هر دو در نام وجود دارند،
-تا حد امکان نام قابل فهم و رایج فارسی را ارائه کن.
+7. اطلاعات جدیدی که در نام اصلی وجود ندارد اضافه نکن.
 
-8. اگر شکل دارویی مهم است، آن را به فارسی حفظ کن.
-مثلاً:
-TABLET = قرص
-CAPSULE = کپسول
-SUPPOSITORY = شیاف
-VAGINAL = واژینال
-INJECTION = تزریقی
+8. ترجمه باید برای یک کاربر عادی قابل فهم باشد، نه ترجمه تحت‌اللفظی انگلیسی.
 
-9. اطلاعاتی را که در نام اصلی وجود ندارد اضافه نکن.
+9. اصطلاحات دارویی رایج را به شکل طبیعی فارسی بنویس.
 
-10. اگر در مورد نام دارو مطمئن نیستی،
-نام اصلی را تا حد امکان حفظ کن و حدس نزن.
+10. برای ASA / ACETYLSALICYLIC ACID:
+    ترجیحاً از «آسپرین (اسید استیل‌سالسیلیک)» استفاده کن.
 
-11. خروجی فقط JSON معتبر باشد.
+11. برای DELAYED RELEASE:
+    این عبارت را به صورت «رهش تأخیری» یا در صورت مناسب بودن،
+    اصلاً در نام نمایشی نیاور؛ چون شکل دارویی اصلی باید برای کاربر قابل فهم باشد.
 
-ساختار خروجی:
+12. برای ENOXAPARIN:
+    از «انوکساپارین» استفاده کن و از ترجمه بیش از حد فنی نام خودداری کن.
+
+13. برای SUPPOSITORY VAGINAL:
+    از «شیاف واژینال» استفاده کن.
+
+14. برای TABLET ORAL:
+    اگر از متن مشخص است قرص خوراکی است، می‌توانی «قرص خوراکی» بنویسی.
+
+15. اگر نام تجاری و ماده مؤثره هر دو وجود دارند،
+    نام رایج و قابل فهم را حفظ کن.
+
+16. اگر مطمئن نیستی، نام اصلی را تا حد امکان حفظ کن و حدس نزن.
+
+17. خروجی فقط JSON معتبر باشد.
+
+ساختار:
 
 {
   "medications": [
@@ -1420,7 +1431,6 @@ INJECTION = تزریقی
   ]
 }
 """
-
         user_prompt = """
 نام داروهای زیر را فقط برای نمایش به کاربر فارسی و قابل فهم کن.
 
@@ -1665,6 +1675,396 @@ INJECTION = تزریقی
         return prescription_data
 
 
+
+# =========================================================
+# PARSE MEDICATION FREQUENCY
+# =========================================================
+
+def parse_frequency_per_day(frequency):
+
+    if not frequency:
+        return None
+
+    text = str(frequency).strip()
+
+    if "یک بار" in text:
+        return 1
+
+    if "دو بار" in text:
+        return 2
+
+    if "سه بار" in text:
+        return 3
+
+    if "چهار بار" in text:
+        return 4
+
+    if "هر 24 ساعت" in text:
+        return 1
+
+    if "هر ۱۲ ساعت" in text or "هر 12 ساعت" in text:
+        return 2
+
+    if "هر 8 ساعت" in text or "هر ۸ ساعت" in text:
+        return 3
+
+    if "هر 6 ساعت" in text or "هر ۶ ساعت" in text:
+        return 4
+
+    print(
+        "Unknown medication frequency:",
+        repr(frequency),
+        flush=True
+    )
+
+    return None
+
+# =========================================================
+# BUILD SUGGESTED MEDICATION TIMES
+# =========================================================
+
+def build_suggested_times(doses_per_day):
+
+    if doses_per_day == 1:
+        return ["09:00"]
+
+    if doses_per_day == 2:
+        return ["09:00", "21:00"]
+
+    if doses_per_day == 3:
+        return ["09:00", "15:00", "21:00"]
+
+    if doses_per_day == 4:
+        return ["09:00", "13:00", "17:00", "21:00"]
+
+    return []
+
+# =========================================================
+# CALCULATE END DATE FROM DURATION
+# =========================================================
+
+def calculate_end_date_from_duration(
+    start_date,
+    duration
+):
+
+    if not duration:
+        return None
+
+    text = str(duration).strip()
+
+    import re
+
+    match = re.search(
+        r"(\d+)",
+        text
+    )
+
+    if not match:
+        return None
+
+    days = int(match.group(1))
+
+    if days <= 0:
+        return None
+
+    return start_date + timedelta(
+        days=days - 1
+    )
+
+
+
+# =========================================================
+# PARSE PRESCRIPTION DATE
+# =========================================================
+
+def parse_prescription_date(value):
+
+    if not value:
+        return None
+
+    try:
+
+        parsed = parse_jalali_date(
+            str(value)
+        )
+
+        return parsed
+
+    except Exception as e:
+
+        print(
+            "Prescription date parse error:",
+            repr(e),
+            flush=True
+        )
+
+        return None
+# =========================================================
+# SAVE PRESCRIPTION AND MEDICATIONS
+# =========================================================
+
+def save_prescription_and_medications(
+    user_id,
+    prescription_data
+):
+
+    if not prescription_data:
+        return None
+
+    medications = prescription_data.get(
+        "medications",
+        []
+    )
+
+    if not medications:
+        return None
+
+    today = datetime.now(
+        IRAN_TZ
+    ).date()
+
+    with get_db_connection() as conn:
+
+        with conn.cursor() as cur:
+
+            # -------------------------------------------------
+            # STEP 1: Save prescription
+            # -------------------------------------------------
+
+            cur.execute("""
+                INSERT INTO mahroo_prescriptions (
+                    user_id,
+                    prescription_date,
+                    extracted_data,
+                    confirmed
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s::jsonb,
+                    TRUE
+                )
+                RETURNING id
+            """, (
+                user_id,
+                parse_prescription_date(
+                    prescription_data.get(
+                        "prescription_date"
+                    )
+                )
+                json.dumps(
+                    prescription_data,
+                    ensure_ascii=False
+                )
+            ))
+
+            prescription_id = cur.fetchone()[0]
+
+            print(
+                "Prescription saved:",
+                prescription_id,
+                flush=True
+            )
+
+            saved_medications = []
+
+            # -------------------------------------------------
+            # STEP 2: Save each medication
+            # -------------------------------------------------
+
+            for medication in medications:
+
+                name = (
+                    medication.get(
+                        "persian_name"
+                    )
+                    or medication.get(
+                        "name"
+                    )
+                )
+
+                if not name:
+                    print(
+                        "Skipping medication without name.",
+                        flush=True
+                    )
+                    continue
+
+                frequency = medication.get(
+                    "frequency"
+                )
+
+                doses_per_day = (
+                    parse_frequency_per_day(
+                        frequency
+                    )
+                )
+
+                if not doses_per_day:
+                    print(
+                        "Skipping medication with unknown frequency:",
+                        name,
+                        frequency,
+                        flush=True
+                    )
+                    continue
+
+                times = build_suggested_times(
+                    doses_per_day
+                )
+
+                if not times:
+                    print(
+                        "No suggested times for:",
+                        name,
+                        flush=True
+                    )
+                    continue
+
+                # -------------------------------------------------
+                # Start date
+                # -------------------------------------------------
+
+                start_date = today
+
+                # -------------------------------------------------
+                # End date
+                # -------------------------------------------------
+
+                duration = medication.get(
+                    "duration"
+                )
+
+                end_date = (
+                    calculate_end_date_from_duration(
+                        start_date,
+                        duration
+                    )
+                )
+
+                # -------------------------------------------------
+                # Number of doses
+                #
+                # "مقادیر مصرف: ۲ عدد" is kept separately
+                # in instructions and is NOT interpreted
+                # as frequency.
+                # -------------------------------------------------
+
+                number_of_doses = None
+
+                instructions = medication.get(
+                    "instructions"
+                )
+
+                if instructions:
+                    import re
+
+                    match = re.search(
+                        r"(\d+|[۰-۹]+)",
+                        str(instructions)
+                    )
+
+                    if match:
+                        raw_number = match.group(1)
+
+                        translation = str.maketrans(
+                            "۰۱۲۳۴۵۶۷۸۹",
+                            "0123456789"
+                        )
+
+                        try:
+                            number_of_doses = int(
+                                raw_number.translate(
+                                    translation
+                                )
+                            )
+                        except Exception:
+                            number_of_doses = None
+
+                # -------------------------------------------------
+                # Insert medication
+                # -------------------------------------------------
+
+                cur.execute("""
+                    INSERT INTO mahroo_medications (
+                        user_id,
+                        name,
+                        doses_per_day,
+                        number_of_doses,
+                        active,
+                        start_date,
+                        end_date
+                    )
+                    VALUES (
+                        %s,
+                        %s,
+                        %s,
+                        %s,
+                        TRUE,
+                        %s,
+                        %s
+                    )
+                    RETURNING id
+                """, (
+                    user_id,
+                    name,
+                    doses_per_day,
+                    number_of_doses,
+                    start_date,
+                    end_date
+                ))
+
+                medication_id = cur.fetchone()[0]
+
+                print(
+                    "Medication saved:",
+                    medication_id,
+                    name,
+                    flush=True
+                )
+
+                # -------------------------------------------------
+                # Insert schedules
+                # -------------------------------------------------
+
+                for scheduled_time in times:
+
+                    cur.execute("""
+                        INSERT INTO mahroo_medication_schedules (
+                            medication_id,
+                            scheduled_time,
+                            active
+                        )
+                        VALUES (
+                            %s,
+                            %s,
+                            TRUE
+                        )
+                    """, (
+                        medication_id,
+                        scheduled_time
+                    ))
+
+                saved_medications.append({
+                    "id": medication_id,
+                    "name": name,
+                    "doses_per_day": doses_per_day,
+                    "times": times,
+                    "start_date": start_date.isoformat(),
+                    "end_date": (
+                        end_date.isoformat()
+                        if end_date
+                        else None
+                    )
+                })
+
+            conn.commit()
+
+    return {
+        "prescription_id": prescription_id,
+        "medications": saved_medications
+    }
 # =========================================================
 # BUILD PRESCRIPTION PREVIEW
 # =========================================================
@@ -5982,6 +6382,7 @@ def receive_message():
 
       
         
+        
         # =========================================================
         # PRESCRIPTION REVIEW
         # =========================================================
@@ -5989,7 +6390,7 @@ def receive_message():
         if state == "PRESCRIPTION_REVIEW":
         
             # -----------------------------------------------------
-            # تأیید اطلاعات نسخه
+            # تأیید اطلاعات
             # -----------------------------------------------------
         
             if text == "✅ تأیید اطلاعات":
@@ -6017,24 +6418,125 @@ def receive_message():
                         "status": "ok"
                     })
         
-                # فعلاً فقط مرحله بعد را مشخص می‌کنیم.
-                # هنوز هیچ دارویی ثبت نمی‌شود.
+                print(
+                    "========== SAVING PRESCRIPTION ==========",
+                    flush=True
+                )
         
-                set_session(
-                    user_id,
-                    "PRESCRIPTION_TIME_SETUP",
-                    {
-                        "prescription_data":
-                            prescription_data
-                    }
+                print(
+                    json.dumps(
+                        prescription_data,
+                        ensure_ascii=False,
+                        indent=2
+                    ),
+                    flush=True
+                )
+        
+                try:
+        
+                    saved_data = (
+                        save_prescription_and_medications(
+                            user_id=user_id,
+                            prescription_data=prescription_data
+                        )
+                    )
+        
+                except Exception as e:
+        
+                    print(
+                        "Prescription save error:",
+                        repr(e),
+                        flush=True
+                    )
+        
+                    send_message(
+                        chat_id,
+                        "❌ هنگام ثبت اطلاعات نسخه مشکلی پیش آمد.\n\n"
+                        "لطفاً دوباره تلاش کنید."
+                    )
+        
+                    return jsonify({
+                        "status": "ok"
+                    })
+        
+                if not saved_data:
+        
+                    send_message(
+                        chat_id,
+                        "❌ هیچ دارویی برای ثبت پیدا نشد.\n\n"
+                        "لطفاً دوباره نسخه را بررسی کنید."
+                    )
+        
+                    return jsonify({
+                        "status": "ok"
+                    })
+        
+                # -------------------------------------------------
+                # Clear prescription session
+                # -------------------------------------------------
+        
+                clear_session(
+                    user_id
+                )
+        
+                # -------------------------------------------------
+                # Build confirmation message
+                # -------------------------------------------------
+        
+                message = (
+                    "✅ <b>نسخه با موفقیت ثبت شد.</b>\n\n"
+                    f"💊 تعداد داروهای ثبت‌شده: "
+                    f"{len(saved_data['medications'])}\n\n"
+                )
+        
+                for medication in saved_data["medications"]:
+        
+                    message += (
+                        f"• <b>{medication['name']}</b>\n"
+                        f"  ⏰ زمان یادآوری: "
+                        f"{'، '.join(medication['times'])}\n"
+                    )
+        
+                    if medication["end_date"]:
+        
+                        medication_end_date = (
+                            datetime.strptime(
+                                medication["end_date"],
+                                "%Y-%m-%d"
+                            ).date()
+                        )
+        
+                        message += (
+                            f"  📅 تا تاریخ: "
+                            f"{format_jalali_date("
+                            f"medication_end_date"
+                            f")}\n"
+                        )
+        
+                    else:
+        
+                        message += (
+                            "  📅 مدت مصرف: "
+                            "در نسخه مشخص نشده\n"
+                        )
+        
+                    message += "\n"
+        
+                message += (
+                    "🔔 یادآوری‌های مصرف دارو برای شما فعال شد.\n\n"
+                    "⚠️ زمان‌های بالا زمان‌های پیشنهادی اولیه سیستم هستند. "
+                    "در مرحله بعد امکان تغییر زمان مصرف هر دارو را اضافه می‌کنیم."
                 )
         
                 send_message(
                     chat_id,
-                    "✅ اطلاعات نسخه تأیید شد.\n\n"
-                    "در مرحله بعد، زمان‌های پیشنهادی مصرف "
-                    "برای هر دارو مشخص می‌شود.",
+                    message,
                     MAIN_MENU_BUTTONS
+                )
+        
+                set_session(
+                    user_id,
+                    "MAIN_MENU"
                 )
         
                 return jsonify({
@@ -6102,9 +6604,8 @@ def receive_message():
             return jsonify({
                 "status": "ok"
             })
-
-
-        
+            
+            
         # =================================================
         # MAIN MENU:
         # DASHBOARD
