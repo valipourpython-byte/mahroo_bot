@@ -7,7 +7,7 @@ import re
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import jdatetime
-
+import base64
 # =========================================================
 # APP
 # =========================================================
@@ -834,6 +834,312 @@ CONTEXT دارویی مهرو:
         return None
     
 
+# =========================================================
+# PRESCRIPTION IMAGE VISION
+# =========================================================
+
+def extract_prescription_from_image(image_path):
+
+    if not OPENROUTER_API_KEY:
+
+        print(
+            "ERROR: OPENROUTER_API_KEY is not configured.",
+            flush=True
+        )
+
+        return None
+
+    if not image_path:
+
+        print(
+            "ERROR: Prescription image path is empty.",
+            flush=True
+        )
+
+        return None
+
+    try:
+
+        print(
+            "========== PRESCRIPTION VISION ==========",
+            flush=True
+        )
+
+        print(
+            "Image path:",
+            image_path,
+            flush=True
+        )
+
+        # -------------------------------------------------
+        # خواندن تصویر
+        # -------------------------------------------------
+
+        with open(
+            image_path,
+            "rb"
+        ) as image_file:
+
+            image_bytes = image_file.read()
+
+        print(
+            "Image size:",
+            len(image_bytes),
+            "bytes",
+            flush=True
+        )
+
+        # -------------------------------------------------
+        # تبدیل تصویر به Base64
+        # -------------------------------------------------
+
+        image_base64 = base64.b64encode(
+            image_bytes
+        ).decode("utf-8")
+
+        image_data_url = (
+            "data:image/jpeg;base64,"
+            + image_base64
+        )
+
+        # -------------------------------------------------
+        # Prompt
+        # -------------------------------------------------
+
+        system_prompt = """
+تو سامانه استخراج اطلاعات نسخه پزشکی برای ربات «مهرو» هستی.
+
+وظیفه تو فقط خواندن اطلاعات قابل مشاهده در تصویر نسخه
+و استخراج داروهای نوشته‌شده توسط پزشک است.
+
+قوانین بسیار مهم:
+
+1. فقط اطلاعاتی را استخراج کن که واقعاً در تصویر قابل مشاهده است.
+
+2. اگر نام دارو، دوز، تعداد دفعات مصرف یا مدت مصرف
+خوانا نیست، حدس نزن.
+
+3. اگر بخشی از نسخه ناخوانا است، مقدار آن را null قرار بده.
+
+4. هیچ دارویی را از خودت اضافه نکن.
+
+5. نام دارو را تا حد امکان همان‌طور که در نسخه نوشته شده ثبت کن.
+
+6. اگر نام دارو به انگلیسی نوشته شده، نام انگلیسی را حفظ کن.
+
+7. اطلاعات نسخه را فقط به صورت JSON معتبر برگردان.
+
+8. هیچ توضیحی خارج از JSON ننویس.
+
+ساختار خروجی:
+
+{
+  "prescription_date": null,
+  "medications": [
+    {
+      "name": null,
+      "dose": null,
+      "frequency": null,
+      "duration": null,
+      "instructions": null
+    }
+  ],
+  "notes": null
+}
+
+اگر هیچ دارویی قابل تشخیص نیست:
+
+{
+  "prescription_date": null,
+  "medications": [],
+  "notes": "اطلاعات دارویی نسخه قابل تشخیص نیست."
+}
+"""
+
+        user_prompt = """
+این تصویر یک نسخه پزشکی است.
+
+لطفاً فقط اطلاعات قابل مشاهده نسخه را استخراج کن
+و مطابق ساختار JSON مشخص‌شده برگردان.
+
+در صورت ناخوانا بودن هر بخش، حدس نزن و null قرار بده.
+"""
+
+        # -------------------------------------------------
+        # ساخت درخواست OpenRouter
+        # -------------------------------------------------
+
+        payload = {
+
+            "model":
+                OPENROUTER_VISION_MODEL,
+
+            "messages": [
+
+                {
+                    "role":
+                        "system",
+
+                    "content":
+                        system_prompt
+                },
+
+                {
+                    "role":
+                        "user",
+
+                    "content": [
+
+                        {
+                            "type":
+                                "text",
+
+                            "text":
+                                user_prompt
+                        },
+
+                        {
+                            "type":
+                                "image_url",
+
+                            "image_url": {
+                                "url":
+                                    image_data_url
+                            }
+                        }
+
+                    ]
+                }
+
+            ],
+
+            "temperature":
+                0.1,
+
+            "max_tokens":
+                1200,
+
+            "reasoning": {
+                "enabled":
+                    False
+            }
+        }
+
+        headers = {
+
+            "Authorization":
+                f"Bearer {OPENROUTER_API_KEY}",
+
+            "Content-Type":
+                "application/json",
+
+            "HTTP-Referer":
+                "https://htvsai.app",
+
+            "X-Title":
+                "Mahroo"
+        }
+
+        # -------------------------------------------------
+        # ارسال تصویر به OpenRouter
+        # -------------------------------------------------
+
+        response = requests.post(
+
+            "https://openrouter.ai/api/v1/chat/completions",
+
+            headers=headers,
+
+            json=payload,
+
+            timeout=120
+        )
+
+        print(
+            "OpenRouter Vision status:",
+            response.status_code,
+            flush=True
+        )
+
+        print(
+            "OpenRouter Vision response:",
+            response.text[:5000],
+            flush=True
+        )
+
+        if not response.ok:
+
+            print(
+                "OpenRouter Vision error:",
+                response.status_code,
+                response.text,
+                flush=True
+            )
+
+            return None
+
+        # -------------------------------------------------
+        # خواندن پاسخ
+        # -------------------------------------------------
+
+        data = response.json()
+
+        choices = data.get(
+            "choices",
+            []
+        )
+
+        if not choices:
+
+            print(
+                "OpenRouter Vision returned no choices.",
+                flush=True
+            )
+
+            return None
+
+        message = choices[0].get(
+            "message",
+            {}
+        )
+
+        answer = message.get(
+            "content"
+        )
+
+        if not answer:
+
+            print(
+                "OpenRouter Vision returned empty content.",
+                flush=True
+            )
+
+            return None
+
+        answer = answer.strip()
+
+        print(
+            "Extracted prescription:",
+            answer,
+            flush=True
+        )
+
+        print(
+            "==========================================",
+            flush=True
+        )
+
+        return answer
+
+    except Exception as e:
+
+        print(
+            "Prescription Vision exception:",
+            repr(e),
+            flush=True
+        )
+
+        return None
 # =========================================================
 # USER FUNCTIONS
 # =========================================================
@@ -4722,14 +5028,17 @@ def receive_message():
 
         # =================================================
 
-        # =================================================
-        # PRESCRIPTION IMAGE
-        # =================================================
+        # =========================================================
+        # PRESCRIPTION IMAGE HANDLER
+        # =========================================================
         
         if state == "PRESCRIPTION_IMAGE":
         
-            # بررسی اینکه پیام شامل عکس است
             photo = message.get("photo")
+        
+            # -----------------------------------------------------
+            # بررسی اینکه کاربر واقعاً عکس فرستاده باشد
+            # -----------------------------------------------------
         
             if not photo:
         
@@ -4743,10 +5052,15 @@ def receive_message():
                     "status": "ok"
                 })
         
-            # انتخاب بزرگ‌ترین سایز عکس
+            # -----------------------------------------------------
+            # انتخاب بزرگ‌ترین نسخه تصویر
+            # -----------------------------------------------------
+        
             largest_photo = photo[-1]
         
-            file_id = largest_photo.get("file_id")
+            file_id = largest_photo.get(
+                "file_id"
+            )
         
             print(
                 "========== PRESCRIPTION IMAGE ==========",
@@ -4770,6 +5084,10 @@ def receive_message():
                 flush=True
             )
         
+            # -----------------------------------------------------
+            # بررسی File ID
+            # -----------------------------------------------------
+        
             if not file_id:
         
                 send_message(
@@ -4782,9 +5100,9 @@ def receive_message():
                     "status": "ok"
                 })
         
-            # -------------------------------------------------
+            # -----------------------------------------------------
             # دانلود موقت تصویر از Bale
-            # -------------------------------------------------
+            # -----------------------------------------------------
         
             print(
                 "========== BALE FILE DOWNLOAD ==========",
@@ -4806,6 +5124,10 @@ def receive_message():
                 flush=True
             )
         
+            # -----------------------------------------------------
+            # بررسی موفقیت دانلود
+            # -----------------------------------------------------
+        
             if not temp_path:
         
                 send_message(
@@ -4818,14 +5140,98 @@ def receive_message():
                     "status": "ok"
                 })
         
-            # -------------------------------------------------
-            # فعلاً فقط تست دانلود
-            # -------------------------------------------------
+            # -----------------------------------------------------
+            # استخراج اطلاعات نسخه با Vision
+            # -----------------------------------------------------
+        
+            prescription_result = None
+        
+            try:
+        
+                prescription_result = (
+                    extract_prescription_from_image(
+                        temp_path
+                    )
+                )
+        
+                print(
+                    "========== PRESCRIPTION RESULT ==========",
+                    flush=True
+                )
+        
+                print(
+                    prescription_result,
+                    flush=True
+                )
+        
+                print(
+                    "=========================================",
+                    flush=True
+                )
+        
+            except Exception as e:
+        
+                print(
+                    "Prescription processing error:",
+                    repr(e),
+                    flush=True
+                )
+        
+            finally:
+        
+                # -------------------------------------------------
+                # حذف حتمی تصویر موقت
+                # -------------------------------------------------
+        
+                try:
+        
+                    if os.path.exists(
+                        temp_path
+                    ):
+        
+                        os.remove(
+                            temp_path
+                        )
+        
+                        print(
+                            "Temporary prescription image deleted:",
+                            temp_path,
+                            flush=True
+                        )
+        
+                except Exception as e:
+        
+                    print(
+                        "Temporary image deletion error:",
+                        repr(e),
+                        flush=True
+                    )
+        
+            # -----------------------------------------------------
+            # بررسی نتیجه Vision
+            # -----------------------------------------------------
+        
+            if not prescription_result:
+        
+                send_message(
+                    chat_id,
+                    "❌ متأسفانه نتوانستم اطلاعات نسخه را از تصویر استخراج کنم.\n\n"
+                    "لطفاً یک عکس واضح‌تر از نسخه ارسال کنید."
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            # -----------------------------------------------------
+            # فعلاً فقط نمایش موفقیت
+            # مرحله بعدی: تبدیل JSON و تأیید کاربر
+            # -----------------------------------------------------
         
             send_message(
                 chat_id,
-                "✅ تصویر نسخه با موفقیت دریافت و به صورت موقت دانلود شد.\n\n"
-                "مرحله بعدی پردازش تصویر نسخه است."
+                "✅ اطلاعات نسخه با موفقیت از تصویر استخراج شد.\n\n"
+                "نتیجه در حال بررسی است."
             )
         
             return jsonify({
