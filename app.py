@@ -1666,6 +1666,123 @@ INJECTION = تزریقی
 
 
 # =========================================================
+# BUILD PRESCRIPTION PREVIEW
+# =========================================================
+
+def build_prescription_preview(
+    prescription_data
+):
+
+    if not prescription_data:
+
+        return (
+            "❌ اطلاعات نسخه قابل نمایش نیست."
+        )
+
+    medications = prescription_data.get(
+        "medications",
+        []
+    )
+
+    if not medications:
+
+        return (
+            "❌ هیچ دارویی از نسخه قابل تشخیص نیست."
+        )
+
+    message = (
+        "📋 <b>اطلاعات استخراج‌شده از نسخه</b>\n\n"
+    )
+
+    for index, medication in enumerate(
+        medications,
+        start=1
+    ):
+
+        persian_name = (
+            medication.get(
+                "persian_name"
+            )
+            or medication.get(
+                "name"
+            )
+            or "نامشخص"
+        )
+
+        dose = (
+            medication.get(
+                "dose"
+            )
+        )
+
+        frequency = (
+            medication.get(
+                "frequency"
+            )
+        )
+
+        duration = (
+            medication.get(
+                "duration"
+            )
+        )
+
+        instructions = (
+            medication.get(
+                "instructions"
+            )
+        )
+
+        message += (
+            f"<b>{index}️⃣ {persian_name}</b>\n"
+        )
+
+        if dose:
+            message += (
+                f"💊 دوز: {dose}\n"
+            )
+
+        if frequency:
+            message += (
+                f"🔄 مصرف: {frequency}\n"
+            )
+        else:
+            message += (
+                "🔄 تعداد مصرف: نامشخص\n"
+            )
+
+        if duration:
+            message += (
+                f"📅 مدت مصرف: {duration}\n"
+            )
+        else:
+            message += (
+                "📅 مدت مصرف: "
+                "در نسخه مشخص نیست\n"
+            )
+
+        if instructions:
+            message += (
+                f"📝 دستور مصرف: "
+                f"{instructions}\n"
+            )
+
+        message += "\n"
+
+    message += (
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "⚠️ <b>لطفاً اطلاعات بالا را بررسی کنید.</b>\n\n"
+        "در این مرحله هنوز هیچ دارویی ثبت نشده است.\n"
+        "پس از تأیید شما، مرحله تعیین زمان مصرف و "
+        "ثبت دارو انجام خواهد شد.\n\n"
+        "آیا اطلاعات استخراج‌شده صحیح است؟"
+    )
+
+    return message
+
+
+
+# =========================================================
 # USER FUNCTIONS
 # =========================================================
 
