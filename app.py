@@ -4808,7 +4808,7 @@ def receive_message():
             send_message(
                 chat_id,
                 "⚧ جنسیت خود را انتخاب کنید:",
-                keyboard=[
+                [
                     ["👨 مرد"],
                     ["👩 زن"],
                     ["⚪ ترجیح می‌دهم نگویم"]
