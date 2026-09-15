@@ -4771,24 +4771,32 @@ def receive_message():
         
             return "", 200
 
-        # =========================
+        # =================================================
         # PROFILE - BIRTH DATE
-        # =========================
+        # =================================================
         
         if state == "PROFILE_ASK_BIRTH_DATE":
         
-            birth_date = parse_jalali_date(text.strip())
+            birth_date = parse_jalali_date(
+                text.strip()
+            )
         
             if not birth_date:
+        
                 send_message(
                     chat_id,
                     "❌ تاریخ واردشده معتبر نیست.\n\n"
                     "لطفاً تاریخ تولد را به صورت شمسی وارد کنید.\n"
                     "مثال:\n"
-                    "<code>1375/05/20</code>"
+                    "<code>1369/08/07</code>"
                 )
-                return "", 200
         
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            # تبدیل datetime.date به string
+            # تا بتواند داخل session به صورت JSON ذخیره شود
             session_data["birth_date"] = birth_date.isoformat()
         
             set_session(
@@ -4807,8 +4815,9 @@ def receive_message():
                 ]
             )
         
-            return "", 200
-
+            return jsonify({
+                "status": "ok"
+            })
 
 
 
