@@ -5213,7 +5213,7 @@ def receive_message():
 
 
         # =================================================
-
+        
         # =========================================================
         # PRESCRIPTION IMAGE HANDLER
         # =========================================================
@@ -5332,49 +5332,49 @@ def receive_message():
         
             prescription_result = None
             prescription_data = None
-            
+        
             try:
-            
+        
                 # -------------------------------------------------
                 # STEP 1: Extract prescription from image
                 # -------------------------------------------------
-            
+        
                 prescription_result = (
                     extract_prescription_from_image(
                         temp_path
                     )
                 )
-            
+        
                 print(
                     "========== RAW PRESCRIPTION RESULT ==========",
                     flush=True
                 )
-            
+        
                 print(
                     prescription_result,
                     flush=True
                 )
-            
+        
                 print(
                     "=============================================",
                     flush=True
                 )
-            
+        
                 # -------------------------------------------------
                 # STEP 2: Parse Vision JSON
                 # -------------------------------------------------
-            
+        
                 prescription_data = (
                     parse_prescription_result(
                         prescription_result
                     )
                 )
-            
+        
                 print(
                     "========== PARSED PRESCRIPTION ==========",
                     flush=True
                 )
-            
+        
                 print(
                     json.dumps(
                         prescription_data,
@@ -5385,19 +5385,11 @@ def receive_message():
                     else None,
                     flush=True
                 )
-            
+        
                 print(
                     "==========================================",
                     flush=True
                 )
-
-except Exception as e:
-
-    print(
-        "Prescription processing error:",
-        repr(e),
-        flush=True
-    ) 
         
             except Exception as e:
         
@@ -5442,13 +5434,13 @@ except Exception as e:
             # -----------------------------------------------------
         
             if not prescription_data:
-
+        
                 send_message(
                     chat_id,
                     "❌ متأسفانه نتوانستم اطلاعات نسخه را از تصویر استخراج کنم.\n\n"
                     "لطفاً یک عکس واضح‌تر از نسخه ارسال کنید."
                 )
-            
+        
                 return jsonify({
                     "status": "ok"
                 })
@@ -5467,7 +5459,9 @@ except Exception as e:
             return jsonify({
                 "status": "ok"
             })
-            
+      
+
+        
         # =================================================
         # MAIN MENU:
         # DASHBOARD
