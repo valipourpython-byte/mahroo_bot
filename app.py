@@ -1910,10 +1910,16 @@ def save_prescription_and_medications(
                     )
                     continue
 
-                times = build_suggested_times(
-                    doses_per_day
+                times = medication.get(
+                    "times"
                 )
-
+                
+                if not times:
+                
+                    times = build_suggested_times(
+                        doses_per_day
+                    )
+                
                 if not times:
                     print(
                         "No suggested times for:",
@@ -2150,7 +2156,16 @@ def build_prescription_preview(
             message += (
                 "🔄 تعداد مصرف: نامشخص\n"
             )
-
+        times = medication.get(
+            "times"
+        )
+        
+        if times:
+        
+            message += (
+                f"⏰ زمان مصرف: "
+                f"{'، '.join(times)}\n"
+            )
         if duration:
             message += (
                 f"📅 مدت مصرف: {duration}\n"
@@ -2180,7 +2195,180 @@ def build_prescription_preview(
 
     return message
 
+# =========================================================
+# PRESCRIPTION EDIT HELPERS
+# =========================================================
 
+def prescription_frequency_options():
+    return [
+        ["1️⃣ یک بار در روز"],
+        ["2️⃣ دو بار در روز"],
+        ["3️⃣ سه بار در روز"],
+        ["4️⃣ چهار بار در روز"],
+        ["❌ لغو اصلاح"]
+    ]
+
+
+def prescription_frequency_to_text(value):
+
+    mapping = {
+        1: "یک بار در روز",
+        2: "دو بار در روز",
+        3: "سه بار در روز",
+        4: "چهار بار در روز"
+    }
+
+    return mapping.get(value)
+
+
+def prescription_frequency_to_count(text):
+
+    if not text:
+        return None
+
+    text = str(text).strip()
+
+    if "یک بار" in text:
+        return 1
+
+    if "دو بار" in text:
+        return 2
+
+    if "سه بار" in text:
+        return 3
+
+    if "چهار بار" in text:
+        return 4
+
+    if "هر 24 ساعت" in text or "هر ۲۴ ساعت" in text:
+        return 1
+
+    if "هر 12 ساعت" in text or "هر ۱۲ ساعت" in text:
+        return 2
+
+    if "هر 8 ساعت" in text or "هر ۸ ساعت" in text:
+        return 3
+
+    if "هر 6 ساعت" in text or "هر ۶ ساعت" in text:
+        return 4
+
+    return None
+
+
+def prescription_suggested_times(doses_per_day):
+
+    if doses_per_day == 1:
+        return ["09:00"]
+
+    if doses_per_day == 2:
+        return [
+            "09:00",
+            "21:00"
+        ]
+
+    if doses_per_day == 3:
+        return [
+            "09:00",
+            "15:00",
+            "21:00"
+        ]
+
+    if doses_per_day == 4:
+        return [
+            "09:00",
+            "13:00",
+            "17:00",
+            "21:00"
+        ]
+
+    return []
+
+
+def prescription_duration_to_end_date(duration):
+
+    if not duration:
+        return None
+
+    text = str(duration).strip()
+
+    import re
+
+    # تبدیل اعداد فارسی به انگلیسی
+    translation = str.maketrans(
+        "۰۱۲۳۴۵۶۷۸۹",
+        "0123456789"
+    )
+
+    text = text.translate(translation)
+
+    match = re.search(
+        r"(\d+)",
+        text
+    )
+
+    if not match:
+        return None
+
+    days = int(match.group(1))
+
+    if days <= 0:
+        return None
+
+    start_date = datetime.now(
+        IRAN_TZ
+    ).date()
+
+    return (
+        start_date
+        + timedelta(
+            days=days - 1
+        )
+    )
+
+
+def build_prescription_edit_menu(
+    medications
+):
+
+    buttons = []
+
+    for index, medication in enumerate(
+        medications,
+        start=1
+    ):
+
+        name = (
+            medication.get("persian_name")
+            or medication.get("name")
+            or "داروی بدون نام"
+        )
+
+        buttons.append([
+            f"{index}️⃣ {name}"
+        ])
+
+    buttons.append([
+        "✅ اتمام اصلاحات"
+    ])
+
+    buttons.append([
+        "❌ لغو اصلاح"
+    ])
+
+    return buttons
+
+
+def build_prescription_field_menu():
+
+    return [
+        ["💊 اصلاح نام دارو"],
+        ["🔄 اصلاح تعداد دفعات مصرف"],
+        ["📅 اصلاح مدت مصرف"],
+        ["⏰ اصلاح زمان‌های مصرف"],
+        ["⬅️ بازگشت به لیست داروها"],
+        ["✅ اتمام اصلاحات"],
+        ["❌ لغو اصلاح"]
+    ]
 
 # =========================================================
 # USER FUNCTIONS
@@ -6551,44 +6739,99 @@ def receive_message():
             # -----------------------------------------------------
         
             if text == "✏️ اصلاح اطلاعات":
-        
+
+                prescription_data = (
+                    session_data.get(
+                        "prescription_data"
+                    )
+                )
+            
+                if not prescription_data:
+            
+                    send_message(
+                        chat_id,
+                        "❌ اطلاعات نسخه پیدا نشد.\n\n"
+                        "لطفاً دوباره عکس نسخه را ارسال کنید.",
+                        MAIN_MENU_BUTTONS
+                    )
+            
+                    clear_session(
+                        user_id
+                    )
+            
+                    return jsonify({
+                        "status": "ok"
+                    })
+            
+                medications = (
+                    prescription_data.get(
+                        "medications",
+                        []
+                    )
+                )
+            
+                if not medications:
+            
+                    send_message(
+                        chat_id,
+                        "❌ هیچ دارویی برای اصلاح پیدا نشد.",
+                        MAIN_MENU_BUTTONS
+                    )
+            
+                    clear_session(
+                        user_id
+                    )
+            
+                    return jsonify({
+                        "status": "ok"
+                    })
+            
+                set_session(
+                    user_id,
+                    "PRESCRIPTION_EDIT_SELECT",
+                    {
+                        "prescription_data":
+                            prescription_data
+                    }
+                )
+            
                 send_message(
                     chat_id,
                     "✏️ <b>اصلاح اطلاعات نسخه</b>\n\n"
-                    "در مرحله بعد امکان اصلاح نام، "
-                    "تعداد دفعات مصرف، مدت مصرف و "
-                    "زمان‌های مصرف داروها اضافه می‌شود.\n\n"
-                    "فعلاً هیچ دارویی ثبت نشده است."
+                    "لطفاً دارویی را که می‌خواهید اصلاح کنید انتخاب کنید:",
+                    build_prescription_edit_menu(
+                        medications
+                    )
                 )
-        
+            
                 return jsonify({
                     "status": "ok"
                 })
-        
-            # -----------------------------------------------------
-            # لغو
-            # -----------------------------------------------------
-        
-            if text == "❌ لغو":
-        
-                clear_session(
-                    user_id
-                )
-        
-                send_message(
-                    chat_id,
-                    "❌ افزودن دارو از روی نسخه لغو شد.",
-                    MAIN_MENU_BUTTONS
-                )
-        
-                set_session(
-                    user_id,
-                    "MAIN_MENU"
-                )
-        
-                return jsonify({
-                    "status": "ok"
-                })
+                    
+                        # -----------------------------------------------------
+                        # لغو
+                        # -----------------------------------------------------
+                    
+                        if text == "❌ لغو":
+                    
+                            clear_session(
+                                user_id
+                            )
+                    
+                            send_message(
+                                chat_id,
+                                "❌ افزودن دارو از روی نسخه لغو شد.",
+                                MAIN_MENU_BUTTONS
+                            )
+                    
+                            set_session(
+                                user_id,
+                                "MAIN_MENU"
+                            )
+                    
+                            return jsonify({
+                                "status": "ok"
+                            })
         
             # -----------------------------------------------------
             # گزینه نامعتبر
@@ -7099,14 +7342,961 @@ def receive_message():
 
 
 
+        # =========================================================
+        # PRESCRIPTION EDIT - SELECT MEDICATION
+        # =========================================================
+        
+        if state == "PRESCRIPTION_EDIT_SELECT":
+        
+            prescription_data = (
+                session_data.get(
+                    "prescription_data"
+                )
+            )
+        
+            medications = (
+                prescription_data.get(
+                    "medications",
+                    []
+                )
+                if prescription_data
+                else []
+            )
+        
+            if text == "❌ لغو اصلاح":
+        
+                clear_session(
+                    user_id
+                )
+        
+                send_message(
+                    chat_id,
+                    "❌ اصلاح نسخه لغو شد.\n\n"
+                    "هیچ تغییری در اطلاعات نسخه اعمال نشد.",
+                    MAIN_MENU_BUTTONS
+                )
+        
+                set_session(
+                    user_id,
+                    "MAIN_MENU"
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            if text == "✅ اتمام اصلاحات":
+        
+                set_session(
+                    user_id,
+                    "PRESCRIPTION_REVIEW",
+                    {
+                        "prescription_data":
+                            prescription_data
+                    }
+                )
+        
+                send_message(
+                    chat_id,
+                    build_prescription_preview(
+                        prescription_data
+                    ),
+                    [
+                        ["✅ تأیید اطلاعات"],
+                        ["✏️ اصلاح اطلاعات"],
+                        ["❌ لغو"]
+                    ]
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            selected_index = None
+        
+            for index, medication in enumerate(
+                medications,
+                start=1
+            ):
+        
+                name = (
+                    medication.get(
+                        "persian_name"
+                    )
+                    or medication.get(
+                        "name"
+                    )
+                    or "داروی بدون نام"
+                )
+        
+                button_text = (
+                    f"{index}️⃣ {name}"
+                )
+        
+                if text == button_text:
+        
+                    selected_index = index - 1
+                    break
+        
+            if selected_index is None:
+        
+                send_message(
+                    chat_id,
+                    "لطفاً یکی از داروهای موجود را انتخاب کنید.",
+                    build_prescription_edit_menu(
+                        medications
+                    )
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            selected_medication = (
+                medications[selected_index]
+            )
+        
+            set_session(
+                user_id,
+                "PRESCRIPTION_EDIT_FIELD",
+                {
+                    "prescription_data":
+                        prescription_data,
+        
+                    "medication_index":
+                        selected_index
+                }
+            )
+        
+            medication_name = (
+                selected_medication.get(
+                    "persian_name"
+                )
+                or selected_medication.get(
+                    "name"
+                )
+                or "داروی بدون نام"
+            )
+        
+            send_message(
+                chat_id,
+                "✏️ <b>ویرایش دارو</b>\n\n"
+                f"💊 داروی انتخاب‌شده:\n"
+                f"<b>{medication_name}</b>\n\n"
+                "کدام قسمت را می‌خواهید اصلاح کنید؟",
+                build_prescription_field_menu()
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
+
+        # =========================================================
+        # PRESCRIPTION EDIT - SELECT FIELD
+        # =========================================================
+        
+        if state == "PRESCRIPTION_EDIT_FIELD":
+        
+            prescription_data = (
+                session_data.get(
+                    "prescription_data"
+                )
+            )
+        
+            medication_index = (
+                session_data.get(
+                    "medication_index"
+                )
+            )
+        
+            medications = (
+                prescription_data.get(
+                    "medications",
+                    []
+                )
+                if prescription_data
+                else []
+            )
+        
+            if (
+                medication_index is None
+                or medication_index >= len(medications)
+            ):
+        
+                send_message(
+                    chat_id,
+                    "❌ داروی انتخاب‌شده پیدا نشد.",
+                    MAIN_MENU_BUTTONS
+                )
+        
+                clear_session(
+                    user_id
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            medication = (
+                medications[medication_index]
+            )
+        
+            # ---------------------------------------------------------
+            # CANCEL
+            # ---------------------------------------------------------
+        
+            if text == "❌ لغو اصلاح":
+        
+                clear_session(
+                    user_id
+                )
+        
+                send_message(
+                    chat_id,
+                    "❌ اصلاح نسخه لغو شد.",
+                    MAIN_MENU_BUTTONS
+                )
+        
+                set_session(
+                    user_id,
+                    "MAIN_MENU"
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            # ---------------------------------------------------------
+            # BACK TO MEDICATION LIST
+            # ---------------------------------------------------------
+        
+            if text == "⬅️ بازگشت به لیست داروها":
+        
+                set_session(
+                    user_id,
+                    "PRESCRIPTION_EDIT_SELECT",
+                    {
+                        "prescription_data":
+                            prescription_data
+                    }
+                )
+        
+                send_message(
+                    chat_id,
+                    "لطفاً دارویی را برای اصلاح انتخاب کنید:",
+                    build_prescription_edit_menu(
+                        medications
+                    )
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            # ---------------------------------------------------------
+            # FINISH EDITING
+            # ---------------------------------------------------------
+        
+            if text == "✅ اتمام اصلاحات":
+        
+                set_session(
+                    user_id,
+                    "PRESCRIPTION_REVIEW",
+                    {
+                        "prescription_data":
+                            prescription_data
+                    }
+                )
+        
+                send_message(
+                    chat_id,
+                    build_prescription_preview(
+                        prescription_data
+                    ),
+                    [
+                        ["✅ تأیید اطلاعات"],
+                        ["✏️ اصلاح اطلاعات"],
+                        ["❌ لغو"]
+                    ]
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            # ---------------------------------------------------------
+            # EDIT NAME
+            # ---------------------------------------------------------
+        
+            if text == "💊 اصلاح نام دارو":
+        
+                set_session(
+                    user_id,
+                    "PRESCRIPTION_EDIT_NAME",
+                    {
+                        "prescription_data":
+                            prescription_data,
+        
+                        "medication_index":
+                            medication_index
+                    }
+                )
+        
+                current_name = (
+                    medication.get(
+                        "persian_name"
+                    )
+                    or medication.get(
+                        "name"
+                    )
+                    or "نامشخص"
+                )
+        
+                send_message(
+                    chat_id,
+                    "💊 <b>اصلاح نام دارو</b>\n\n"
+                    f"نام فعلی:\n"
+                    f"<b>{current_name}</b>\n\n"
+                    "نام صحیح دارو را ارسال کنید:"
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            # ---------------------------------------------------------
+            # EDIT FREQUENCY
+            # ---------------------------------------------------------
+        
+            if text == "🔄 اصلاح تعداد دفعات مصرف":
+        
+                set_session(
+                    user_id,
+                    "PRESCRIPTION_EDIT_FREQUENCY",
+                    {
+                        "prescription_data":
+                            prescription_data,
+        
+                        "medication_index":
+                            medication_index
+                    }
+                )
+        
+                send_message(
+                    chat_id,
+                    "🔄 <b>تعداد دفعات مصرف در روز</b>\n\n"
+                    "تعداد صحیح دفعات مصرف را انتخاب کنید:",
+                    prescription_frequency_options()
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            # ---------------------------------------------------------
+            # EDIT DURATION
+            # ---------------------------------------------------------
+        
+            if text == "📅 اصلاح مدت مصرف":
+        
+                set_session(
+                    user_id,
+                    "PRESCRIPTION_EDIT_DURATION",
+                    {
+                        "prescription_data":
+                            prescription_data,
+        
+                        "medication_index":
+                            medication_index
+                    }
+                )
+        
+                current_duration = (
+                    medication.get(
+                        "duration"
+                    )
+                )
+        
+                current_text = (
+                    current_duration
+                    if current_duration
+                    else "مشخص نشده"
+                )
+        
+                send_message(
+                    chat_id,
+                    "📅 <b>اصلاح مدت مصرف</b>\n\n"
+                    f"مدت فعلی: <b>{current_text}</b>\n\n"
+                    "مدت مصرف را وارد کنید.\n\n"
+                    "مثلاً:\n"
+                    "• ۷ روز\n"
+                    "• ۱۲ روز\n"
+                    "• ۳۰ روز\n\n"
+                    "اگر دارو مدت مشخصی ندارد، بنویسید:\n"
+                    "<b>نامحدود</b>"
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            # ---------------------------------------------------------
+            # EDIT TIMES
+            # ---------------------------------------------------------
+        
+            if text == "⏰ اصلاح زمان‌های مصرف":
+        
+                doses_per_day = (
+                    prescription_frequency_to_count(
+                        medication.get(
+                            "frequency"
+                        )
+                    )
+                )
+        
+                if not doses_per_day:
+        
+                    send_message(
+                        chat_id,
+                        "❌ تعداد دفعات مصرف این دارو مشخص نیست.\n\n"
+                        "ابتدا تعداد دفعات مصرف را اصلاح کنید."
+                    )
+        
+                    return jsonify({
+                        "status": "ok"
+                    })
+        
+                set_session(
+                    user_id,
+                    "PRESCRIPTION_EDIT_TIMES",
+                    {
+                        "prescription_data":
+                            prescription_data,
+        
+                        "medication_index":
+                            medication_index,
+        
+                        "doses_per_day":
+                            doses_per_day
+                    }
+                )
+        
+                current_times = (
+                    medication.get(
+                        "times"
+                    )
+                )
+        
+                if not current_times:
+        
+                    current_times = (
+                        prescription_suggested_times(
+                            doses_per_day
+                        )
+                    )
+        
+                send_message(
+                    chat_id,
+                    "⏰ <b>اصلاح زمان‌های مصرف</b>\n\n"
+                    f"تعداد دفعات مصرف: "
+                    f"<b>{doses_per_day}</b>\n\n"
+                    f"زمان‌های فعلی:\n"
+                    f"<b>{'، '.join(current_times)}</b>\n\n"
+                    "لطفاً زمان‌ها را به این شکل وارد کنید:\n"
+                    "<b>09:00, 21:00</b>\n\n"
+                    "برای هر نوبت یک ساعت وارد کنید."
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            send_message(
+                chat_id,
+                "لطفاً یکی از گزینه‌های موجود را انتخاب کنید.",
+                build_prescription_field_menu()
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
 
 
+        # =========================================================
+        # PRESCRIPTION EDIT - NAME
+        # =========================================================
+        
+        if state == "PRESCRIPTION_EDIT_NAME":
+        
+            prescription_data = (
+                session_data.get(
+                    "prescription_data"
+                )
+            )
+        
+            medication_index = (
+                session_data.get(
+                    "medication_index"
+                )
+            )
+        
+            medications = (
+                prescription_data.get(
+                    "medications",
+                    []
+                )
+            )
+        
+            if text == "❌ لغو اصلاح":
+        
+                clear_session(
+                    user_id
+                )
+        
+                send_message(
+                    chat_id,
+                    "❌ اصلاح نسخه لغو شد.",
+                    MAIN_MENU_BUTTONS
+                )
+        
+                set_session(
+                    user_id,
+                    "MAIN_MENU"
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            new_name = text.strip()
+        
+            if not new_name:
+        
+                send_message(
+                    chat_id,
+                    "❌ نام دارو نمی‌تواند خالی باشد.\n\n"
+                    "لطفاً نام صحیح دارو را وارد کنید."
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            medications[
+                medication_index
+            ]["persian_name"] = new_name
+        
+            set_session(
+                user_id,
+                "PRESCRIPTION_EDIT_FIELD",
+                {
+                    "prescription_data":
+                        prescription_data,
+        
+                    "medication_index":
+                        medication_index
+                }
+            )
+        
+            send_message(
+                chat_id,
+                "✅ نام دارو اصلاح شد.\n\n"
+                "چه قسمت دیگری را می‌خواهید اصلاح کنید؟",
+                build_prescription_field_menu()
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
 
 
+        # =========================================================
+        # PRESCRIPTION EDIT - FREQUENCY
+        # =========================================================
+        
+        if state == "PRESCRIPTION_EDIT_FREQUENCY":
+        
+            prescription_data = (
+                session_data.get(
+                    "prescription_data"
+                )
+            )
+        
+            medication_index = (
+                session_data.get(
+                    "medication_index"
+                )
+            )
+        
+            medications = (
+                prescription_data.get(
+                    "medications",
+                    []
+                )
+            )
+        
+            if text == "❌ لغو اصلاح":
+        
+                clear_session(
+                    user_id
+                )
+        
+                send_message(
+                    chat_id,
+                    "❌ اصلاح نسخه لغو شد.",
+                    MAIN_MENU_BUTTONS
+                )
+        
+                set_session(
+                    user_id,
+                    "MAIN_MENU"
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            frequency_map = {
+                "1️⃣ یک بار در روز": 1,
+                "2️⃣ دو بار در روز": 2,
+                "3️⃣ سه بار در روز": 3,
+                "4️⃣ چهار بار در روز": 4
+            }
+        
+            doses_per_day = (
+                frequency_map.get(text)
+            )
+        
+            if not doses_per_day:
+        
+                send_message(
+                    chat_id,
+                    "لطفاً یکی از گزینه‌های تعداد دفعات مصرف را انتخاب کنید.",
+                    prescription_frequency_options()
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            medications[
+                medication_index
+            ]["frequency"] = (
+                prescription_frequency_to_text(
+                    doses_per_day
+                )
+            )
+        
+            medications[
+                medication_index
+            ]["times"] = (
+                prescription_suggested_times(
+                    doses_per_day
+                )
+            )
+        
+            set_session(
+                user_id,
+                "PRESCRIPTION_EDIT_FIELD",
+                {
+                    "prescription_data":
+                        prescription_data,
+        
+                    "medication_index":
+                        medication_index
+                }
+            )
+        
+            send_message(
+                chat_id,
+                "✅ تعداد دفعات مصرف اصلاح شد.\n\n"
+                f"🔄 مصرف: "
+                f"<b>{medications[medication_index]['frequency']}</b>\n"
+                f"⏰ زمان‌های پیشنهادی جدید: "
+                f"<b>{'، '.join(medications[medication_index]['times'])}</b>\n\n"
+                "چه قسمت دیگری را می‌خواهید اصلاح کنید؟",
+                build_prescription_field_menu()
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
+
+        # =========================================================
+        # PRESCRIPTION EDIT - DURATION
+        # =========================================================
+        
+        if state == "PRESCRIPTION_EDIT_DURATION":
+        
+            prescription_data = (
+                session_data.get(
+                    "prescription_data"
+                )
+            )
+        
+            medication_index = (
+                session_data.get(
+                    "medication_index"
+                )
+            )
+        
+            medications = (
+                prescription_data.get(
+                    "medications",
+                    []
+                )
+            )
+        
+            if text == "❌ لغو اصلاح":
+        
+                clear_session(
+                    user_id
+                )
+        
+                send_message(
+                    chat_id,
+                    "❌ اصلاح نسخه لغو شد.",
+                    MAIN_MENU_BUTTONS
+                )
+        
+                set_session(
+                    user_id,
+                    "MAIN_MENU"
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            duration_text = text.strip()
+        
+            if duration_text == "نامحدود":
+        
+                medications[
+                    medication_index
+                ]["duration"] = None
+        
+            else:
+        
+                import re
+        
+                translated = duration_text.translate(
+                    str.maketrans(
+                        "۰۱۲۳۴۵۶۷۸۹",
+                        "0123456789"
+                    )
+                )
+        
+                match = re.search(
+                    r"(\d+)",
+                    translated
+                )
+        
+                if not match:
+        
+                    send_message(
+                        chat_id,
+                        "❌ مدت مصرف قابل تشخیص نیست.\n\n"
+                        "مثلاً بنویسید:\n"
+                        "<b>۱۲ روز</b>"
+                    )
+        
+                    return jsonify({
+                        "status": "ok"
+                    })
+        
+                days = int(
+                    match.group(1)
+                )
+        
+                if days <= 0:
+        
+                    send_message(
+                        chat_id,
+                        "❌ تعداد روز باید بیشتر از صفر باشد."
+                    )
+        
+                    return jsonify({
+                        "status": "ok"
+                    })
+        
+                medications[
+                    medication_index
+                ]["duration"] = (
+                    f"{days} روز"
+                )
+        
+            set_session(
+                user_id,
+                "PRESCRIPTION_EDIT_FIELD",
+                {
+                    "prescription_data":
+                        prescription_data,
+        
+                    "medication_index":
+                        medication_index
+                }
+            )
+        
+            send_message(
+                chat_id,
+                "✅ مدت مصرف اصلاح شد.\n\n"
+                "چه قسمت دیگری را می‌خواهید اصلاح کنید؟",
+                build_prescription_field_menu()
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
+
+
+        # =========================================================
+        # PRESCRIPTION EDIT - TIMES
+        # =========================================================
+        
+        if state == "PRESCRIPTION_EDIT_TIMES":
+        
+            prescription_data = (
+                session_data.get(
+                    "prescription_data"
+                )
+            )
+        
+            medication_index = (
+                session_data.get(
+                    "medication_index"
+                )
+            )
+        
+            doses_per_day = (
+                session_data.get(
+                    "doses_per_day"
+                )
+            )
+        
+            medications = (
+                prescription_data.get(
+                    "medications",
+                    []
+                )
+            )
+        
+            if text == "❌ لغو اصلاح":
+        
+                clear_session(
+                    user_id
+                )
+        
+                send_message(
+                    chat_id,
+                    "❌ اصلاح نسخه لغو شد.",
+                    MAIN_MENU_BUTTONS
+                )
+        
+                set_session(
+                    user_id,
+                    "MAIN_MENU"
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            raw_times = text.strip()
+        
+            parts = [
+                item.strip()
+                for item in raw_times.split(",")
+                if item.strip()
+            ]
+        
+            if len(parts) != doses_per_day:
+        
+                send_message(
+                    chat_id,
+                    "❌ تعداد زمان‌های واردشده با تعداد دفعات مصرف هماهنگ نیست.\n\n"
+                    f"تعداد دفعات مصرف: <b>{doses_per_day}</b>\n"
+                    f"باید دقیقاً <b>{doses_per_day}</b> زمان وارد کنید.\n\n"
+                    "مثلاً برای دو بار در روز:\n"
+                    "<b>09:00, 21:00</b>"
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
+        
+            import re
+        
+            valid_times = []
+        
+            for time_value in parts:
+        
+                match = re.match(
+                    r"^([01]?\d|2[0-3]):([0-5]\d)$",
+                    time_value
+                )
+        
+                if not match:
+        
+                    send_message(
+                        chat_id,
+                        f"❌ زمان <b>{time_value}</b> معتبر نیست.\n\n"
+                        "فرمت صحیح:\n"
+                        "<b>09:00</b>"
+                    )
+        
+                    return jsonify({
+                        "status": "ok"
+                    })
+        
+                hour = int(
+                    match.group(1)
+                )
+        
+                minute = int(
+                    match.group(2)
+                )
+        
+                valid_times.append(
+                    f"{hour:02d}:{minute:02d}"
+                )
+        
+            valid_times.sort()
+        
+            medications[
+                medication_index
+            ]["times"] = valid_times
+        
+            set_session(
+                user_id,
+                "PRESCRIPTION_EDIT_FIELD",
+                {
+                    "prescription_data":
+                        prescription_data,
+        
+                    "medication_index":
+                        medication_index
+                }
+            )
+        
+            send_message(
+                chat_id,
+                "✅ زمان‌های مصرف اصلاح شد.\n\n"
+                f"⏰ زمان‌های جدید:\n"
+                f"<b>{'، '.join(valid_times)}</b>\n\n"
+                "چه قسمت دیگری را می‌خواهید اصلاح کنید؟",
+                build_prescription_field_menu()
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
 
 
         
-        
+
+
+
         # =================================================
         # DRUG SEARCH STATE
         # =================================================
