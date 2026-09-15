@@ -4838,7 +4838,7 @@ def receive_message():
                 send_message(
                     chat_id,
                     "لطفاً یکی از گزینه‌های موجود را انتخاب کنید:",
-                    keyboard=[
+                    [
                         ["👨 مرد"],
                         ["👩 زن"],
                         ["⚪ ترجیح می‌دهم نگویم"]
@@ -4924,7 +4924,65 @@ def receive_message():
             )
         
             return "", 200
+        # =========================
+        # PROFILE - IMPORTANT NOTES
+        # =========================
         
+        if state == "PROFILE_ASK_IMPORTANT_NOTES":
+        
+            important_notes = text.strip()
+        
+            if not important_notes:
+        
+                send_message(
+                    chat_id,
+                    "لطفاً پاسخ خود را وارد کنید.\n"
+                    "اگر نکته پزشکی مهمی ندارید، بنویسید: <code>ندارم</code>"
+                )
+        
+                return "", 200
+        
+            session_data["important_notes"] = important_notes
+        
+            # تبدیل تاریخ تولد ذخیره‌شده در session
+            # از string به datetime.date
+            birth_date = datetime.strptime(
+                session_data["birth_date"],
+                "%Y-%m-%d"
+            ).date()
+        
+            # تبدیل تاریخ میلادی به شمسی برای نمایش
+            birth_date_text = format_jalali_date(
+                birth_date
+            )
+        
+            set_session(
+                user_id,
+                "PROFILE_CONFIRM",
+                session_data
+            )
+        
+            message = (
+                "📋 <b>اطلاعات پروفایل شما</b>\n\n"
+                f"👤 <b>نام:</b> {session_data['full_name']}\n"
+                f"🎂 <b>تاریخ تولد:</b> {birth_date_text}\n"
+                f"⚧ <b>جنسیت:</b> {session_data['gender']}\n"
+                f"⚠️ <b>حساسیت‌ها:</b> {session_data['allergies']}\n"
+                f"🩺 <b>سابقه بیماری:</b> {session_data['medical_history']}\n"
+                f"📝 <b>یادداشت‌های مهم:</b> {session_data['important_notes']}\n\n"
+                "آیا اطلاعات بالا صحیح است؟"
+            )
+        
+            send_message(
+                chat_id,
+                message,
+                [
+                    ["✅ ثبت پروفایل"],
+                    ["❌ لغو"]
+                ]
+            )
+        
+            return "", 200
         # =========================
         # PROFILE - CONFIRM
         # =========================
