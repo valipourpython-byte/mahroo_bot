@@ -412,156 +412,156 @@ def send_message(
 
         return None
 
-    # =========================================================
-    # BALE FILE DOWNLOAD
-    # =========================================================
-    
-    def download_bale_file(file_id):
-    
-        if not BALE_API:
-    
+# =========================================================
+# BALE FILE DOWNLOAD
+# =========================================================
+
+def download_bale_file(file_id):
+
+    if not BALE_API:
+
+        print(
+            "ERROR: BALE_BOT_TOKEN is not set"
+        )
+
+        return None
+
+    try:
+
+        # ---------------------------------------------
+        # دریافت مسیر فایل از Bale
+        # ---------------------------------------------
+
+        get_file_api = (
+            f"https://tapi.bale.ai/bot{TOKEN}/getFile"
+        )
+
+        response = requests.post(
+
+            get_file_api,
+
+            json={
+                "file_id": file_id
+            },
+
+            timeout=15
+        )
+
+        print(
+            "Bale getFile response:",
+            response.status_code,
+            response.text
+        )
+
+        if not response.ok:
+
             print(
-                "ERROR: BALE_BOT_TOKEN is not set"
+                "Bale getFile HTTP error:",
+                response.status_code
             )
-    
+
             return None
-    
-        try:
-    
-            # ---------------------------------------------
-            # دریافت مسیر فایل از Bale
-            # ---------------------------------------------
-    
-            get_file_api = (
-                f"https://tapi.bale.ai/bot{TOKEN}/getFile"
-            )
-    
-            response = requests.post(
-    
-                get_file_api,
-    
-                json={
-                    "file_id": file_id
-                },
-    
-                timeout=15
-            )
-    
+
+        data = response.json()
+
+        if data.get("ok") is False:
+
             print(
-                "Bale getFile response:",
-                response.status_code,
-                response.text
+                "Bale getFile returned ok=false:",
+                data
             )
-    
-            if not response.ok:
-    
-                print(
-                    "Bale getFile HTTP error:",
-                    response.status_code
-                )
-    
-                return None
-    
-            data = response.json()
-    
-            if data.get("ok") is False:
-    
-                print(
-                    "Bale getFile returned ok=false:",
-                    data
-                )
-    
-                return None
-    
-            result = data.get("result")
-    
-            if not result:
-    
-                print(
-                    "Bale getFile: result is missing"
-                )
-    
-                return None
-    
-            file_path = result.get("file_path")
-    
-            if not file_path:
-    
-                print(
-                    "Bale getFile: file_path is missing"
-                )
-    
-                return None
-    
-            # ---------------------------------------------
-            # دانلود فایل
-            # ---------------------------------------------
-    
-            download_url = (
-                f"https://tapi.bale.ai/file/bot{TOKEN}/{file_path}"
-            )
-    
-            file_response = requests.get(
-    
-                download_url,
-    
-                timeout=30
-            )
-    
+
+            return None
+
+        result = data.get("result")
+
+        if not result:
+
             print(
-                "Bale file download response:",
-                file_response.status_code
+                "Bale getFile: result is missing"
             )
-    
-            if not file_response.ok:
-    
-                print(
-                    "Bale file download error:",
-                    file_response.status_code
-                )
-    
-                return None
-    
-            # ---------------------------------------------
-            # ذخیره موقت فایل
-            # ---------------------------------------------
-    
-            temp_dir = "/tmp/mahroo"
-    
-            os.makedirs(
-                temp_dir,
-                exist_ok=True
-            )
-    
-            temp_path = os.path.join(
-                temp_dir,
-                "prescription.jpg"
-            )
-    
-            with open(
-                temp_path,
-                "wb"
-            ) as f:
-    
-                f.write(
-                    file_response.content
-                )
-    
+
+            return None
+
+        file_path = result.get("file_path")
+
+        if not file_path:
+
             print(
-                "Prescription temporarily saved:",
-                temp_path
+                "Bale getFile: file_path is missing"
             )
-    
-            return temp_path
-    
-        except Exception as e:
-    
+
+            return None
+
+        # ---------------------------------------------
+        # دانلود فایل
+        # ---------------------------------------------
+
+        download_url = (
+            f"https://tapi.bale.ai/file/bot{TOKEN}/{file_path}"
+        )
+
+        file_response = requests.get(
+
+            download_url,
+
+            timeout=30
+        )
+
+        print(
+            "Bale file download response:",
+            file_response.status_code
+        )
+
+        if not file_response.ok:
+
             print(
                 "Bale file download error:",
-                repr(e)
+                file_response.status_code
             )
-    
+
             return None
+
+        # ---------------------------------------------
+        # ذخیره موقت فایل
+        # ---------------------------------------------
+
+        temp_dir = "/tmp/mahroo"
+
+        os.makedirs(
+            temp_dir,
+            exist_ok=True
+        )
+
+        temp_path = os.path.join(
+            temp_dir,
+            "prescription.jpg"
+        )
+
+        with open(
+            temp_path,
+            "wb"
+        ) as f:
+
+            f.write(
+                file_response.content
+            )
+
+        print(
+            "Prescription temporarily saved:",
+            temp_path
+        )
+
+        return temp_path
+
+    except Exception as e:
+
+        print(
+            "Bale file download error:",
+            repr(e)
+        )
+
+        return None
 # =========================================================
 # LLM
 # =========================================================
