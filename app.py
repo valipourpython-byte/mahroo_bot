@@ -1852,7 +1852,7 @@ def save_prescription_and_medications(
                     prescription_data.get(
                         "prescription_date"
                     )
-                )
+                ),
                 json.dumps(
                     prescription_data,
                     ensure_ascii=False
