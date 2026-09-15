@@ -6808,30 +6808,30 @@ def receive_message():
                     "status": "ok"
                 })
                     
-                        # -----------------------------------------------------
-                        # لغو
-                        # -----------------------------------------------------
-                    
-                        if text == "❌ لغو":
-                    
-                            clear_session(
-                                user_id
-                            )
-                    
-                            send_message(
-                                chat_id,
-                                "❌ افزودن دارو از روی نسخه لغو شد.",
-                                MAIN_MENU_BUTTONS
-                            )
-                    
-                            set_session(
-                                user_id,
-                                "MAIN_MENU"
-                            )
-                    
-                            return jsonify({
-                                "status": "ok"
-                            })
+            # -----------------------------------------------------
+            # لغو
+            # -----------------------------------------------------
+        
+            if text == "❌ لغو":
+        
+                clear_session(
+                    user_id
+                )
+        
+                send_message(
+                    chat_id,
+                    "❌ افزودن دارو از روی نسخه لغو شد.",
+                    MAIN_MENU_BUTTONS
+                )
+        
+                set_session(
+                    user_id,
+                    "MAIN_MENU"
+                )
+        
+                return jsonify({
+                    "status": "ok"
+                })
         
             # -----------------------------------------------------
             # گزینه نامعتبر
