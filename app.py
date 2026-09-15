@@ -1326,6 +1326,345 @@ def parse_prescription_result(
         )
 
         return None
+
+
+# =========================================================
+# NORMALIZE PRESCRIPTION MEDICATION NAMES
+# =========================================================
+
+def normalize_prescription_medications(
+    prescription_data
+):
+
+    if not prescription_data:
+        return None
+
+    medications = prescription_data.get(
+        "medications",
+        []
+    )
+
+    if not medications:
+        return prescription_data
+
+    if not OPENROUTER_API_KEY:
+        print(
+            "ERROR: OPENROUTER_API_KEY is not configured.",
+            flush=True
+        )
+        return prescription_data
+
+    try:
+
+        # -------------------------------------------------
+        # Prepare only medication names for normalization
+        # -------------------------------------------------
+
+        medication_names = []
+
+        for index, medication in enumerate(
+            medications,
+            start=1
+        ):
+
+            medication_names.append({
+                "index": index,
+                "name": medication.get("name")
+            })
+
+        system_prompt = """
+تو یک سامانه نرمال‌سازی نام دارو برای ربات «مهرو» هستی.
+
+وظیفه تو فقط تبدیل نام داروها به نام فارسی قابل فهم برای کاربر است.
+
+قوانین بسیار مهم:
+
+1. فقط نام دارو را ترجمه یا نرمال کن.
+
+2. دوز دارو را تغییر نده.
+
+3. ماده مؤثره دارو را تغییر نده.
+
+4. تعداد دفعات مصرف را تغییر نده.
+
+5. مدت مصرف را تغییر نده.
+
+6. دستور مصرف را تغییر نده.
+
+7. اگر نام تجاری و ماده مؤثره هر دو در نام وجود دارند،
+تا حد امکان نام قابل فهم و رایج فارسی را ارائه کن.
+
+8. اگر شکل دارویی مهم است، آن را به فارسی حفظ کن.
+مثلاً:
+TABLET = قرص
+CAPSULE = کپسول
+SUPPOSITORY = شیاف
+VAGINAL = واژینال
+INJECTION = تزریقی
+
+9. اطلاعاتی را که در نام اصلی وجود ندارد اضافه نکن.
+
+10. اگر در مورد نام دارو مطمئن نیستی،
+نام اصلی را تا حد امکان حفظ کن و حدس نزن.
+
+11. خروجی فقط JSON معتبر باشد.
+
+ساختار خروجی:
+
+{
+  "medications": [
+    {
+      "index": 1,
+      "persian_name": "..."
+    }
+  ]
+}
+"""
+
+        user_prompt = """
+نام داروهای زیر را فقط برای نمایش به کاربر فارسی و قابل فهم کن.
+
+به هیچ وجه دوز، تعداد مصرف، مدت مصرف یا دستور مصرف را تحلیل یا تغییر نده.
+
+ورودی:
+
+""" + json.dumps(
+            medication_names,
+            ensure_ascii=False,
+            indent=2
+        )
+
+        payload = {
+
+            "model":
+                OPENROUTER_MODEL,
+
+            "messages": [
+
+                {
+                    "role":
+                        "system",
+
+                    "content":
+                        system_prompt
+                },
+
+                {
+                    "role":
+                        "user",
+
+                    "content":
+                        user_prompt
+                }
+
+            ],
+
+            "temperature":
+                0.0,
+
+            "max_tokens":
+                800,
+
+            "reasoning": {
+                "enabled":
+                    False
+            }
+        }
+
+        headers = {
+
+            "Authorization":
+                f"Bearer {OPENROUTER_API_KEY}",
+
+            "Content-Type":
+                "application/json",
+
+            "HTTP-Referer":
+                "https://htvsai.app",
+
+            "X-Title":
+                "Mahroo"
+        }
+
+        print(
+            "========== MEDICATION NORMALIZATION ==========",
+            flush=True
+        )
+
+        print(
+            "Normalization model:",
+            repr(OPENROUTER_MODEL),
+            flush=True
+        )
+
+        response = requests.post(
+
+            "https://openrouter.ai/api/v1/chat/completions",
+
+            headers=headers,
+
+            json=payload,
+
+            timeout=60
+        )
+
+        print(
+            "Medication normalization status:",
+            response.status_code,
+            flush=True
+        )
+
+        print(
+            "Medication normalization response:",
+            response.text[:3000],
+            flush=True
+        )
+
+        if not response.ok:
+
+            print(
+                "Medication normalization failed.",
+                flush=True
+            )
+
+            return prescription_data
+
+        data = response.json()
+
+        choices = data.get(
+            "choices",
+            []
+        )
+
+        if not choices:
+
+            print(
+                "Medication normalization returned no choices.",
+                flush=True
+            )
+
+            return prescription_data
+
+        answer = (
+            choices[0]
+            .get("message", {})
+            .get("content")
+        )
+
+        if not answer:
+
+            print(
+                "Medication normalization returned empty content.",
+                flush=True
+            )
+
+            return prescription_data
+
+        answer = answer.strip()
+
+        # -------------------------------------------------
+        # Remove markdown code fences
+        # -------------------------------------------------
+
+        if answer.startswith("```"):
+
+            lines = answer.splitlines()
+
+            if lines:
+                lines = lines[1:]
+
+            if (
+                lines
+                and lines[-1].strip() == "```"
+            ):
+                lines = lines[:-1]
+
+            answer = "\n".join(
+                lines
+            ).strip()
+
+        normalized_data = json.loads(
+            answer
+        )
+
+        normalized_medications = (
+            normalized_data.get(
+                "medications",
+                []
+            )
+        )
+
+        if not isinstance(
+            normalized_medications,
+            list
+        ):
+
+            print(
+                "Invalid normalized medication list.",
+                flush=True
+            )
+
+            return prescription_data
+
+        # -------------------------------------------------
+        # Attach Persian names to original records
+        # -------------------------------------------------
+
+        for item in normalized_medications:
+
+            index = item.get(
+                "index"
+            )
+
+            persian_name = item.get(
+                "persian_name"
+            )
+
+            if (
+                isinstance(index, int)
+                and 1 <= index <= len(medications)
+                and persian_name
+            ):
+
+                medications[
+                    index - 1
+                ][
+                    "persian_name"
+                ] = persian_name
+
+        print(
+            "========== NORMALIZED MEDICATIONS ==========",
+            flush=True
+        )
+
+        print(
+            json.dumps(
+                medications,
+                ensure_ascii=False,
+                indent=2
+            ),
+            flush=True
+        )
+
+        print(
+            "=============================================",
+            flush=True
+        )
+
+        return prescription_data
+
+    except Exception as e:
+
+        print(
+            "Medication normalization error:",
+            repr(e),
+            flush=True
+        )
+
+        # در صورت خطا، اطلاعات اصلی Vision را از دست نمی‌دهیم
+        return prescription_data
+
+
 # =========================================================
 # USER FUNCTIONS
 # =========================================================
@@ -5369,7 +5708,42 @@ def receive_message():
                         prescription_result
                     )
                 )
-        
+
+               
+                # -------------------------------------------------
+                # STEP 3: Normalize medication names to Persian
+                # -------------------------------------------------
+                
+                if prescription_data:
+                
+                    prescription_data = (
+                        normalize_prescription_medications(
+                            prescription_data
+                        )
+                    )
+                
+                    print(
+                        "========== AFTER NORMALIZATION ==========",
+                        flush=True
+                    )
+                
+                    print(
+                        json.dumps(
+                            prescription_data,
+                            ensure_ascii=False,
+                            indent=2
+                        ),
+                        flush=True
+                    )
+                
+                    print(
+                        "==========================================",
+                        flush=True
+                    )
+
+
+
+                
                 print(
                     "========== PARSED PRESCRIPTION ==========",
                     flush=True
