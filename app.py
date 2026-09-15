@@ -1146,6 +1146,186 @@ def extract_prescription_from_image(image_path):
         )
 
         return None
+
+
+# =========================================================
+# PARSE PRESCRIPTION VISION RESULT
+# =========================================================
+
+def parse_prescription_result(
+    prescription_result
+):
+
+    if not prescription_result:
+        print(
+            "Prescription result is empty.",
+            flush=True
+        )
+        return None
+
+    try:
+
+        text = prescription_result.strip()
+
+        print(
+            "RAW PRESCRIPTION TEXT:",
+            repr(text),
+            flush=True
+        )
+
+        # -------------------------------------------------
+        # Remove markdown code fences if model adds them
+        # -------------------------------------------------
+
+        if text.startswith("```"):
+
+            lines = text.splitlines()
+
+            if lines:
+
+                lines = lines[1:]
+
+            if lines and lines[-1].strip() == "```":
+
+                lines = lines[:-1]
+
+            text = "\n".join(lines).strip()
+
+        # -------------------------------------------------
+        # Convert JSON string to Python dictionary
+        # -------------------------------------------------
+
+        data = json.loads(
+            text
+        )
+
+        if not isinstance(
+            data,
+            dict
+        ):
+
+            print(
+                "Prescription JSON is not a dictionary.",
+                flush=True
+            )
+
+            return None
+
+        # -------------------------------------------------
+        # Check medications
+        # -------------------------------------------------
+
+        medications = data.get(
+            "medications"
+        )
+
+        if not isinstance(
+            medications,
+            list
+        ):
+
+            print(
+                "Prescription medications is not a list.",
+                flush=True
+            )
+
+            return None
+
+        print(
+            "Parsed prescription JSON successfully.",
+            flush=True
+        )
+
+        print(
+            "Number of medications:",
+            len(medications),
+            flush=True
+        )
+
+        # -------------------------------------------------
+        # Clean medication records
+        # -------------------------------------------------
+
+        cleaned_medications = []
+
+        for medication in medications:
+
+            if not isinstance(
+                medication,
+                dict
+            ):
+                continue
+
+            cleaned_medications.append({
+
+                "name":
+                    medication.get(
+                        "name"
+                    ),
+
+                "dose":
+                    medication.get(
+                        "dose"
+                    ),
+
+                "frequency":
+                    medication.get(
+                        "frequency"
+                    ),
+
+                "duration":
+                    medication.get(
+                        "duration"
+                    ),
+
+                "instructions":
+                    medication.get(
+                        "instructions"
+                    )
+
+            })
+
+        data["medications"] = (
+            cleaned_medications
+        )
+
+        print(
+            "CLEANED PRESCRIPTION:",
+            json.dumps(
+                data,
+                ensure_ascii=False,
+                indent=2
+            ),
+            flush=True
+        )
+
+        return data
+
+    except json.JSONDecodeError as e:
+
+        print(
+            "Prescription JSON decode error:",
+            repr(e),
+            flush=True
+        )
+
+        print(
+            "Invalid JSON text:",
+            prescription_result,
+            flush=True
+        )
+
+        return None
+
+    except Exception as e:
+
+        print(
+            "Prescription parsing error:",
+            repr(e),
+            flush=True
+        )
+
+        return None
 # =========================================================
 # USER FUNCTIONS
 # =========================================================
@@ -5151,29 +5331,73 @@ def receive_message():
             # -----------------------------------------------------
         
             prescription_result = None
-        
+            prescription_data = None
+            
             try:
-        
+            
+                # -------------------------------------------------
+                # STEP 1: Extract prescription from image
+                # -------------------------------------------------
+            
                 prescription_result = (
                     extract_prescription_from_image(
                         temp_path
                     )
                 )
-        
+            
                 print(
-                    "========== PRESCRIPTION RESULT ==========",
+                    "========== RAW PRESCRIPTION RESULT ==========",
                     flush=True
                 )
-        
+            
                 print(
                     prescription_result,
                     flush=True
                 )
-        
+            
                 print(
-                    "=========================================",
+                    "=============================================",
                     flush=True
                 )
+            
+                # -------------------------------------------------
+                # STEP 2: Parse Vision JSON
+                # -------------------------------------------------
+            
+                prescription_data = (
+                    parse_prescription_result(
+                        prescription_result
+                    )
+                )
+            
+                print(
+                    "========== PARSED PRESCRIPTION ==========",
+                    flush=True
+                )
+            
+                print(
+                    json.dumps(
+                        prescription_data,
+                        ensure_ascii=False,
+                        indent=2
+                    )
+                    if prescription_data
+                    else None,
+                    flush=True
+                )
+            
+                print(
+                    "==========================================",
+                    flush=True
+                )
+
+except Exception as e:
+
+    print(
+        "Prescription processing error:",
+        repr(e),
+        flush=True
+    ) 
         
             except Exception as e:
         
@@ -5217,14 +5441,14 @@ def receive_message():
             # بررسی نتیجه Vision
             # -----------------------------------------------------
         
-            if not prescription_result:
-        
+            if not prescription_data:
+
                 send_message(
                     chat_id,
                     "❌ متأسفانه نتوانستم اطلاعات نسخه را از تصویر استخراج کنم.\n\n"
                     "لطفاً یک عکس واضح‌تر از نسخه ارسال کنید."
                 )
-        
+            
                 return jsonify({
                     "status": "ok"
                 })
