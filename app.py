@@ -837,7 +837,11 @@ CONTEXT دارویی مهرو:
 # =========================================================
 # PRESCRIPTION IMAGE VISION
 # =========================================================
-
+print(
+    "VISION MODEL:",
+    repr(OPENROUTER_VISION_MODEL),
+    flush=True
+)
 def extract_prescription_from_image(image_path):
 
     if not OPENROUTER_API_KEY:
