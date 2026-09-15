@@ -28,7 +28,9 @@ OPENROUTER_MODEL = os.getenv(
     "OPENROUTER_MODEL",
     "inclusionai/ling-3.0-flash-sante:free"
 )
-
+OPENROUTER_VISION_MODEL = os.getenv(
+    "OPENROUTER_VISION_MODEL"
+)
 if TOKEN:
     BALE_API = f"https://tapi.bale.ai/bot{TOKEN}/sendMessage"
 else:
