@@ -10311,6 +10311,7 @@ def lab_download_image(
     file_id,
     image_number
 ):
+    import uuid
 
     if not file_id:
 
