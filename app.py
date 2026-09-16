@@ -12368,340 +12368,390 @@ def health_report_get_lab_status(
 #
 # =========================================================
 
-def health_report_extract_lab_values(
-    record
-):
+def health_report_extract_lab_values(structured_data):
+    """
+    Extract laboratory results from mahroo_health_records.structured_data.
 
-    structured_data = (
-        record.get(
-            "structured_data"
-        )
-    )
+    Expected current structure:
+
+    {
+        "results": [
+            {
+                "name": "WBC",
+                "unit": "/μL",
+                "value": "9860",
+                "reference_range": "4000 - 10000"
+            }
+        ],
+        "test_date": "1405/05/17",
+        "laboratory": "..."
+    }
+
+    Returns a normalized list of dictionaries.
+    """
 
     if not structured_data:
-
         return []
 
-    # =====================================================
-    # اگر structured_data مستقیماً لیست باشد
-    # =====================================================
+    # ---------------------------------------------------------
+    # Determine the list of laboratory results
+    # ---------------------------------------------------------
+    if isinstance(structured_data, list):
+        raw_results = structured_data
 
-    if isinstance(
-        structured_data,
-        list
-    ):
-
-        raw_values = (
-            structured_data
+    elif isinstance(structured_data, dict):
+        raw_results = (
+            structured_data.get("results")
+            or structured_data.get("lab_results")
+            or structured_data.get("tests")
+            or structured_data.get("values")
+            or structured_data.get("parameters")
+            or structured_data.get("results_list")
+            or []
         )
-
-    # =====================================================
-    # اگر structured_data دیکشنری باشد
-    # =====================================================
-
-    elif isinstance(
-        structured_data,
-        dict
-    ):
-
-        raw_values = None
-
-        possible_keys = [
-
-            "results",
-
-            "lab_results",
-
-            "tests",
-
-            "values",
-
-            "parameters",
-
-            "results_list"
-        ]
-
-        for key in possible_keys:
-
-            candidate = (
-                structured_data.get(
-                    key
-                )
-            )
-
-            if isinstance(
-                candidate,
-                list
-            ):
-
-                raw_values = candidate
-
-                break
-
-        # -------------------------------------------------
-        # اگر هیچ لیستی پیدا نشد
-        # -------------------------------------------------
-
-        if raw_values is None:
-
-            raw_values = []
-
-            for key, value in (
-                structured_data.items()
-            ):
-
-                if isinstance(
-                    value,
-                    dict
-                ):
-
-                    item = (
-                        value.copy()
-                    )
-
-                    if (
-                        "name" not in item
-                        and
-                        "test_name" not in item
-                    ):
-
-                        item["name"] = key
-
-                    raw_values.append(
-                        item
-                    )
 
     else:
-
         return []
 
-    results = []
+    if not isinstance(raw_results, list):
+        return []
 
-    # =====================================================
-    # پردازش هر نتیجه
-    # =====================================================
+    normalized = []
 
-    for item in raw_values:
+    for item in raw_results:
 
-        if not isinstance(
-            item,
-            dict
-        ):
-
+        if not isinstance(item, dict):
             continue
 
-        # -------------------------------------------------
-        # نام آزمایش
-        # -------------------------------------------------
-
-        name = None
-
-        for key in [
-
-            "name",
-
-            "test_name",
-
-            "parameter",
-
-            "marker",
-
-            "analyte"
-        ]:
-
-            if item.get(
-                key
-            ) is not None:
-
-                name = item.get(
-                    key
-                )
-
-                break
-
-        # -------------------------------------------------
-        # مقدار
-        # -------------------------------------------------
-
-        value = None
-
-        for key in [
-
-            "value",
-
-            "result",
-
-            "numeric_value",
-
-            "measured_value"
-        ]:
-
-            if item.get(
-                key
-            ) is not None:
-
-                value = item.get(
-                    key
-                )
-
-                break
-
-        if (
-            name is None
-            or
-            value is None
-        ):
-
-            continue
-
-        # -------------------------------------------------
-        # واحد
-        # -------------------------------------------------
-
-        unit = None
-
-        for key in [
-
-            "unit",
-
-            "units"
-        ]:
-
-            if item.get(
-                key
-            ) is not None:
-
-                unit = item.get(
-                    key
-                )
-
-                break
-
-        # -------------------------------------------------
-        # حد پایین مرجع
-        # -------------------------------------------------
-
-        reference_min = None
-
-        for key in [
-
-            "reference_min",
-
-            "ref_min",
-
-            "normal_min",
-
-            "range_min",
-
-            "min_reference",
-
-            "lower_bound",
-
-            "low"
-        ]:
-
-            if item.get(
-                key
-            ) is not None:
-
-                reference_min = item.get(
-                    key
-                )
-
-                break
-
-        # -------------------------------------------------
-        # حد بالای مرجع
-        # -------------------------------------------------
-
-        reference_max = None
-
-        for key in [
-
-            "reference_max",
-
-            "ref_max",
-
-            "normal_max",
-
-            "range_max",
-
-            "max_reference",
-
-            "upper_bound",
-
-            "high"
-        ]:
-
-            if item.get(
-                key
-            ) is not None:
-
-                reference_max = item.get(
-                    key
-                )
-
-                break
-
-        # -------------------------------------------------
-        # تعیین وضعیت
-        # -------------------------------------------------
-
-        status = (
-            health_report_get_lab_status(
-                value=value,
-                reference_min=reference_min,
-                reference_max=reference_max
-            )
+        # -----------------------------------------------------
+        # Name
+        # -----------------------------------------------------
+        name = (
+            item.get("name")
+            or item.get("test_name")
+            or item.get("parameter")
+            or item.get("marker")
+            or item.get("analyte")
         )
 
-        results.append({
+        if not name:
+            continue
 
-            "name":
-                str(name),
+        name = str(name).strip()
 
-            "value":
-                value,
+        # -----------------------------------------------------
+        # Value
+        # -----------------------------------------------------
+        value = (
+            item.get("value")
+            if item.get("value") is not None
+            else item.get("result")
+        )
 
-            "unit":
-                unit,
+        if value is None:
+            value = item.get("numeric_value")
 
-            "reference_min":
-                reference_min,
+        if value is None:
+            value = item.get("measured_value")
 
-            "reference_max":
-                reference_max,
+        if value is not None:
+            value = str(value).strip()
 
-            "status":
-                (
-                    status["status"]
-                    if status
-                    else None
-                ),
+        # -----------------------------------------------------
+        # Unit
+        # -----------------------------------------------------
+        unit = item.get("unit")
 
-            "status_label":
-                (
-                    status["label"]
-                    if status
-                    else None
-                )
+        if unit is None:
+            unit = item.get("units")
+
+        if unit is not None:
+            unit = str(unit).strip()
+
+        # -----------------------------------------------------
+        # Reference range
+        # IMPORTANT:
+        # Current database stores this as one text field:
+        # "155000 - 440000"
+        # "up to 15.5"
+        # "<100"
+        # "30-100"
+        # etc.
+        # -----------------------------------------------------
+        reference_range = item.get("reference_range")
+
+        if reference_range is None:
+            # Backward compatibility with possible older records
+            reference_min = (
+                item.get("reference_min")
+                or item.get("ref_min")
+                or item.get("normal_min")
+                or item.get("range_min")
+                or item.get("min_reference")
+                or item.get("lower_bound")
+                or item.get("low")
+            )
+
+            reference_max = (
+                item.get("reference_max")
+                or item.get("ref_max")
+                or item.get("normal_max")
+                or item.get("range_max")
+                or item.get("max_reference")
+                or item.get("upper_bound")
+                or item.get("high")
+            )
+
+            if reference_min is not None and reference_max is not None:
+                reference_range = f"{reference_min} - {reference_max}"
+
+            elif reference_min is not None:
+                reference_range = f">= {reference_min}"
+
+            elif reference_max is not None:
+                reference_range = f"<= {reference_max}"
+
+        if reference_range is not None:
+            reference_range = str(reference_range).strip()
+
+        # -----------------------------------------------------
+        # Store normalized result
+        # -----------------------------------------------------
+        normalized.append({
+            "name": name,
+            "value": value,
+            "unit": unit,
+            "reference_range": reference_range
         })
 
-    return results
+    return normalized
 
 
+def health_report_parse_reference_range(reference_range):
+    """
+    Parse a laboratory reference range.
+
+    Examples:
+
+        "155000 - 440000"
+            -> (155000.0, 440000.0)
+
+        "0.5 - 1.2"
+            -> (0.5, 1.2)
+
+        "up to 15.5"
+            -> (None, 15.5)
+
+        "<100"
+            -> (None, 100.0)
+
+        ">= 90"
+            -> (90.0, None)
+
+    Returns:
+        (lower, upper)
+    """
+
+    if not reference_range:
+        return None, None
+
+    text = str(reference_range).strip()
+
+    if not text:
+        return None, None
+
+    # Normalize common Unicode characters
+    text = (
+        text.replace("–", "-")
+            .replace("—", "-")
+            .replace("−", "-")
+    )
+
+    # ---------------------------------------------------------
+    # Case 1:
+    # "155000 - 440000"
+    # "0.5-1.2"
+    # ---------------------------------------------------------
+    match = re.search(
+        r"(?<!\d)(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)(?!\d)",
+        text
+    )
+
+    if match:
+        try:
+            lower = float(match.group(1))
+            upper = float(match.group(2))
+            return lower, upper
+        except Exception:
+            pass
+
+    # ---------------------------------------------------------
+    # Case 2:
+    # "up to 15.5"
+    # "up to 46"
+    # ---------------------------------------------------------
+    match = re.search(
+        r"(?:up\s*to|less\s*than\s*or\s*equal\s*to|<=|<)\s*"
+        r"(-?\d+(?:\.\d+)?)",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    if match:
+        try:
+            upper = float(match.group(1))
+            return None, upper
+        except Exception:
+            pass
+
+    # ---------------------------------------------------------
+    # Case 3:
+    # ">= 90"
+    # "> 90"
+    # ---------------------------------------------------------
+    match = re.search(
+        r"(?:greater\s*than\s*or\s*equal\s*to|>=|>)\s*"
+        r"(-?\d+(?:\.\d+)?)",
+        text,
+        flags=re.IGNORECASE
+    )
+
+    if match:
+        try:
+            lower = float(match.group(1))
+            return lower, None
+        except Exception:
+            pass
+
+    # ---------------------------------------------------------
+    # Case 4:
+    # A plain numeric reference range
+    # ---------------------------------------------------------
+    match = re.fullmatch(
+        r"\s*(-?\d+(?:\.\d+)?)\s*",
+        text
+    )
+
+    if match:
+        try:
+            value = float(match.group(1))
+            return value, value
+        except Exception:
+            pass
+
+    return None, None
+
+
+def health_report_get_lab_status(value, reference_range):
+    """
+    Determine laboratory result status based on the reference range.
+
+    Statuses:
+        below
+        above
+        near_lower
+        near_upper
+        normal
+        unknown
+
+    The 10% rule is applied only when both lower and upper
+    reference limits are available.
+    """
+
+    if value is None or reference_range is None:
+        return "unknown"
+
+    try:
+        numeric_value = float(
+            str(value)
+            .replace(",", "")
+            .strip()
+        )
+    except Exception:
+        return "unknown"
+
+    lower, upper = health_report_parse_reference_range(
+        reference_range
+    )
+
+    # ---------------------------------------------------------
+    # No numeric reference boundaries
+    # ---------------------------------------------------------
+    if lower is None and upper is None:
+        return "unknown"
+
+    # ---------------------------------------------------------
+    # Both lower and upper limits
+    # ---------------------------------------------------------
+    if lower is not None and upper is not None:
+
+        if upper < lower:
+            lower, upper = upper, lower
+
+        if numeric_value < lower:
+            return "below"
+
+        if numeric_value > upper:
+            return "above"
+
+        interval = upper - lower
+
+        # Degenerate range
+        if interval <= 0:
+            return "normal"
+
+        ten_percent = interval * 0.10
+
+        if numeric_value <= lower + ten_percent:
+            return "near_lower"
+
+        if numeric_value >= upper - ten_percent:
+            return "near_upper"
+
+        return "normal"
+
+    # ---------------------------------------------------------
+    # Only upper limit exists
+    # Example:
+    # "up to 15.5"
+    # "<100"
+    # ---------------------------------------------------------
+    if upper is not None:
+
+        if numeric_value > upper:
+            return "above"
+
+        # For one-sided ranges, there is no reliable
+        # lower boundary, so do not classify "near lower".
+        return "normal"
+
+    # ---------------------------------------------------------
+    # Only lower limit exists
+    # Example:
+    # ">= 90"
+    # ---------------------------------------------------------
+    if lower is not None:
+
+        if numeric_value < lower:
+            return "below"
+
+        return "normal"
+
+    return "unknown"
 # =========================================================
 # 9. GET LAB RECORDS
 # =========================================================
 
-def health_report_get_lab_records(
-    user_id
-):
+def health_report_get_lab_records(user_id):
+    """
+    Retrieve laboratory test records for the health report.
+
+    Mahroo stores laboratory records with:
+        record_type = 'laboratory_test'
+    """
 
     with get_db_connection() as conn:
-
         with conn.cursor() as cur:
-
             cur.execute("""
                 SELECT
                     id,
@@ -12714,7 +12764,7 @@ def health_report_get_lab_records(
                     notes
                 FROM mahroo_health_records
                 WHERE user_id = %s
-                  AND record_type = 'lab'
+                  AND record_type = 'laboratory_test'
                 ORDER BY
                     record_date DESC NULLS LAST,
                     created_at DESC
@@ -12725,24 +12775,15 @@ def health_report_get_lab_records(
     records = []
 
     for row in rows:
-
         records.append({
-
             "id": row[0],
-
             "record_type": row[1],
-
             "record_date": row[2],
-
             "title": row[3],
-
             "extracted_text": row[4],
-
             "structured_data": row[5],
-
             "user_confirmed": row[6],
-
-            "notes": row[7]
+            "notes": row[7],
         })
 
     return records
