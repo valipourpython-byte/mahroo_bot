@@ -2745,45 +2745,60 @@ def save_display_name(
             conn.commit()
 
 
+
 # =========================================================
 # TIME
 # =========================================================
+
+def normalize_time_text(
+    time_text
+):
+
+    if time_text is None:
+        return None
+
+    translation = str.maketrans(
+        "۰۱۲۳۴۵۶۷۸۹",
+        "0123456789"
+    )
+
+    time_text = (
+        str(time_text)
+        .strip()
+        .translate(translation)
+    )
+
+    return time_text
+
 
 def is_valid_time(
     time_text
 ):
 
-    if not time_text:
+    time_text = normalize_time_text(
+        time_text
+    )
 
+    if not time_text:
         return False
 
     if not re.match(
         r"^\d{1,2}:\d{2}$",
-        time_text.strip()
+        time_text
     ):
-
         return False
 
     try:
 
         hour, minute = map(
-
             int,
-
-            time_text
-            .strip()
-            .split(":")
-
+            time_text.split(":")
         )
 
         return (
-
             0 <= hour <= 23
-
             and
-
             0 <= minute <= 59
-
         )
 
     except Exception:
@@ -2796,29 +2811,25 @@ def schedule_to_datetime(
     scheduled_time
 ):
 
+    scheduled_time = normalize_time_text(
+        scheduled_time
+    )
+
     hour, minute = map(
-
         int,
-
         scheduled_time.split(":")
-
     )
 
     return datetime(
-
         today.year,
-
         today.month,
-
         today.day,
-
         hour,
-
         minute,
-
         tzinfo=IRAN_TZ
-
     )
+
+
 def parse_jalali_date(text):
 
     print("========== PARSE JALALI DATE START ==========", flush=True)
