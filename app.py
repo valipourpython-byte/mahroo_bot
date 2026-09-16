@@ -4929,7 +4929,7 @@ def create_due_occurrences():
     )
 
     today = now.date()
-        print(
+    print(
         "REMINDER DEBUG - now:",
         now,
         "today:",
