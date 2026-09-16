@@ -11717,4 +11717,15 @@ print(
     flush=True
 )
 
+print(
+    "========== HANDLE LAB TEXT CHECK ==========",
+    flush=True
+)
+
+print(
+    "handle_lab_text exists:",
+    callable(handle_lab_text),
+    flush=True
+)
+
 
