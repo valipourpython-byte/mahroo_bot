@@ -4954,10 +4954,11 @@ def create_due_occurrences():
 
         with conn.cursor() as cur:
 
+            
             # -------------------------------------------------
             # ONLY MAHROO MEDICATION TABLES
             # -------------------------------------------------
-
+            
             cur.execute("""
                 SELECT
                     m.id,
@@ -4975,36 +4976,75 @@ def create_due_occurrences():
                 today,
                 today
             ))
-
+            
             rows = cur.fetchall()
+            
             print(
                 "REMINDER DEBUG - rows:",
                 rows,
                 flush=True
             )
-
+            
             for row in rows:
-
+            
                 medication_id = row[0]
-
+            
                 user_id = row[1]
-
+            
                 schedule_id = row[2]
-
+            
                 scheduled_time = row[3]
-
+            
+                # -------------------------------------------------
+                # Validate scheduled time
+                # -------------------------------------------------
+            
                 if not is_valid_time(
                     scheduled_time
                 ):
-
+                    print(
+                        "REMINDER DEBUG - invalid time:",
+                        scheduled_time,
+                        flush=True
+                    )
                     continue
-
+            
                 scheduled_dt = (
                     schedule_to_datetime(
                         today,
                         scheduled_time
                     )
                 )
+            
+                # -------------------------------------------------
+                # Check reminder time
+                #
+                # Allow the scheduled time to be up to
+                # REMINDER_GRACE_MINUTES before or after now.
+                # -------------------------------------------------
+            
+                latest_allowed = (
+                    now
+                    + timedelta(
+                        minutes=
+                        REMINDER_GRACE_MINUTES
+                    )
+                )
+            
+                earliest_allowed = (
+                    now
+                    - timedelta(
+                        minutes=
+                        REMINDER_GRACE_MINUTES
+                    )
+                )
+            
+                is_in_window = (
+                    earliest_allowed
+                    <= scheduled_dt
+                    <= latest_allowed
+                )
+            
                 print(
                     "REMINDER DEBUG - schedule:",
                     scheduled_time,
@@ -5012,25 +5052,19 @@ def create_due_occurrences():
                     scheduled_dt,
                     "now:",
                     now,
-                    "earliest:",
-                    earliest,
+                    "earliest_allowed:",
+                    earliest_allowed,
+                    "latest_allowed:",
+                    latest_allowed,
                     "VALID:",
-                    earliest <= scheduled_dt <= now,
+                    is_in_window,
                     flush=True
                 )
-                # -------------------------------------------------
-                # ONLY REMINDERS WITHIN LAST 10 MINUTES
-                # -------------------------------------------------
-
-                if not (
-
-                    earliest
-                    <= scheduled_dt
-                    <= now
-
-                ):
-
+            
+                if not is_in_window:
                     continue
+
+
 
                 # -------------------------------------------------
                 # Prevent duplicate occurrence
