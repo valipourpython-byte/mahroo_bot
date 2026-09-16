@@ -5018,19 +5018,8 @@ def create_due_occurrences():
             
                 # -------------------------------------------------
                 # Check reminder time
-                #
-                # Allow the scheduled time to be up to
-                # REMINDER_GRACE_MINUTES before or after now.
                 # -------------------------------------------------
-            
-                latest_allowed = (
-                    now
-                    + timedelta(
-                        minutes=
-                        REMINDER_GRACE_MINUTES
-                    )
-                )
-            
+                
                 earliest_allowed = (
                     now
                     - timedelta(
@@ -5038,30 +5027,12 @@ def create_due_occurrences():
                         REMINDER_GRACE_MINUTES
                     )
                 )
-            
-                is_in_window = (
+                
+                if not (
                     earliest_allowed
                     <= scheduled_dt
-                    <= latest_allowed
-                )
-            
-                print(
-                    "REMINDER DEBUG - schedule:",
-                    scheduled_time,
-                    "scheduled_dt:",
-                    scheduled_dt,
-                    "now:",
-                    now,
-                    "earliest_allowed:",
-                    earliest_allowed,
-                    "latest_allowed:",
-                    latest_allowed,
-                    "VALID:",
-                    is_in_window,
-                    flush=True
-                )
-            
-                if not is_in_window:
+                    <= now
+                ):
                     continue
 
 
