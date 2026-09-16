@@ -6973,7 +6973,7 @@ def receive_message():
         # ADD MEDICATION
         # =================================================
 
-        if text == "➕ افزودن دارو":
+        if text == "➕ افزودن دارو بصورت دستی":
 
             set_session(
 
