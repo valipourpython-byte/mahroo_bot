@@ -11734,10 +11734,6 @@ print(
 # 4) نکات قابل توجه آزمایش
 # 5) روند آزمایش‌های تکرارشده
 #
-# نکته:
-# این ماژول فقط اطلاعات موجود در دیتابیس را می‌خواند
-# و هیچ تغییری در اطلاعات دارو، پروفایل یا آزمایش ایجاد نمی‌کند.
-#
 # =========================================================
 
 
@@ -11776,9 +11772,7 @@ def health_report_format_date(value):
 
         if hasattr(value, "strftime"):
 
-            return value.strftime(
-                "%Y/%m/%d"
-            )
+            return value.strftime("%Y/%m/%d")
 
         text = str(value)
 
@@ -11932,27 +11926,6 @@ def health_report_get_medication_schedules(
 # =========================================================
 # 5. MEDICATION ADHERENCE
 # =========================================================
-#
-# فقط این دو وضعیت در محاسبه پایبندی وارد می‌شوند:
-#
-# taken
-# not_taken
-#
-# وضعیت‌های زیر وارد محاسبه نمی‌شوند:
-#
-# pending
-# sent
-# snoozed
-#
-# بنابراین Reminder نادیده‌گرفته‌شده،
-# به‌عنوان not_taken محسوب نمی‌شود.
-#
-# فرمول:
-#
-# adherence =
-# taken / (taken + not_taken) * 100
-#
-# =========================================================
 
 def health_report_get_medication_adherence(
     user_id,
@@ -12080,17 +12053,9 @@ def health_report_build_medications(
             )
         )
 
-        # -------------------------------------------------
-        # نام دارو
-        # -------------------------------------------------
-
         lines.append(
             f"💊 {medication_name}"
         )
-
-        # -------------------------------------------------
-        # تعداد نوبت روزانه
-        # -------------------------------------------------
 
         if schedules:
 
@@ -12115,10 +12080,6 @@ def health_report_build_medications(
                 "ثبت نشده"
             )
 
-        # -------------------------------------------------
-        # مصرف
-        # -------------------------------------------------
-
         lines.append(
             f"مصرف‌شده: "
             f"{adherence['taken']}"
@@ -12128,10 +12089,6 @@ def health_report_build_medications(
             f"مصرف‌نشده: "
             f"{adherence['not_taken']}"
         )
-
-        # -------------------------------------------------
-        # پایبندی
-        # -------------------------------------------------
 
         if adherence["adherence"] is not None:
 
@@ -12147,10 +12104,6 @@ def health_report_build_medications(
                 "هنوز اطلاعات کافی ثبت نشده است."
             )
 
-        # -------------------------------------------------
-        # تاریخ شروع
-        # -------------------------------------------------
-
         if medication.get(
             "start_date"
         ):
@@ -12161,10 +12114,6 @@ def health_report_build_medications(
                     medication["start_date"]
                 )
             )
-
-        # -------------------------------------------------
-        # تاریخ پایان
-        # -------------------------------------------------
 
         if medication.get(
             "end_date"
@@ -12185,351 +12134,14 @@ def health_report_build_medications(
 
 
 # =========================================================
-# 7. LAB STATUS
-# =========================================================
-#
-# وضعیت آزمایش بر اساس محدوده مرجع همان آزمایش:
-#
-# value < reference_min
-#       → پایین‌تر از محدوده
-#
-# value > reference_max
-#       → بالاتر از محدوده
-#
-# 10% ابتدایی محدوده
-#       → نزدیک به حد پایین
-#
-# 10% انتهایی محدوده
-#       → نزدیک به حد بالا
-#
-# سایر مقادیر داخل محدوده
-#       → بدون نکته قابل توجه
-#
+# 7. PARSE LAB REFERENCE RANGE
 # =========================================================
 
-def health_report_get_lab_status(
-    value,
-    reference_min=None,
-    reference_max=None
+def health_report_parse_reference_range(
+    reference_range
 ):
-
-    if value is None:
-
-        return None
-
-    try:
-
-        numeric_value = float(
-            value
-        )
-
-    except Exception:
-
-        return None
-
-    try:
-
-        lower = (
-            float(reference_min)
-            if reference_min is not None
-            else None
-        )
-
-    except Exception:
-
-        lower = None
-
-    try:
-
-        upper = (
-            float(reference_max)
-            if reference_max is not None
-            else None
-        )
-
-    except Exception:
-
-        upper = None
-
-    # -----------------------------------------------------
-    # پایین‌تر از محدوده
-    # -----------------------------------------------------
-
-    if lower is not None:
-
-        if numeric_value < lower:
-
-            return {
-
-                "status": "below",
-
-                "label":
-                    "پایین‌تر از محدوده"
-            }
-
-    # -----------------------------------------------------
-    # بالاتر از محدوده
-    # -----------------------------------------------------
-
-    if upper is not None:
-
-        if numeric_value > upper:
-
-            return {
-
-                "status": "above",
-
-                "label":
-                    "بالاتر از محدوده"
-            }
-
-    # -----------------------------------------------------
-    # بررسی نزدیکی به مرزها
-    # -----------------------------------------------------
-
-    if (
-        lower is not None
-        and upper is not None
-        and upper > lower
-    ):
-
-        interval_width = (
-            upper -
-            lower
-        )
-
-        lower_boundary = (
-            lower +
-            (
-                0.10 *
-                interval_width
-            )
-        )
-
-        upper_boundary = (
-            upper -
-            (
-                0.10 *
-                interval_width
-            )
-        )
-
-        # نزدیک به حد پایین
-
-        if numeric_value <= lower_boundary:
-
-            return {
-
-                "status":
-                    "near_lower",
-
-                "label":
-                    "نزدیک به حد پایین محدوده"
-            }
-
-        # نزدیک به حد بالا
-
-        if numeric_value >= upper_boundary:
-
-            return {
-
-                "status":
-                    "near_upper",
-
-                "label":
-                    "نزدیک به حد بالای محدوده"
-            }
-
-    # -----------------------------------------------------
-    # داخل محدوده و دور از مرزها
-    # -----------------------------------------------------
-
-    return {
-
-        "status": "normal",
-
-        "label": None
-    }
-
-
-# =========================================================
-# 8. EXTRACT NUMERIC LAB VALUES
-# =========================================================
-#
-# این تابع ساختارهای مختلف JSON را پشتیبانی می‌کند.
-#
-# اطلاعات مورد نیاز:
-#
-# name
-# value
-# unit
-# reference_min
-# reference_max
-#
-# =========================================================
-
-def health_report_extract_lab_values(structured_data):
     """
-    Extract laboratory results from mahroo_health_records.structured_data.
-
-    Expected current structure:
-
-    {
-        "results": [
-            {
-                "name": "WBC",
-                "unit": "/μL",
-                "value": "9860",
-                "reference_range": "4000 - 10000"
-            }
-        ],
-        "test_date": "1405/05/17",
-        "laboratory": "..."
-    }
-
-    Returns a normalized list of dictionaries.
-    """
-
-    if not structured_data:
-        return []
-
-    # ---------------------------------------------------------
-    # Determine the list of laboratory results
-    # ---------------------------------------------------------
-    if isinstance(structured_data, list):
-        raw_results = structured_data
-
-    elif isinstance(structured_data, dict):
-        raw_results = (
-            structured_data.get("results")
-            or structured_data.get("lab_results")
-            or structured_data.get("tests")
-            or structured_data.get("values")
-            or structured_data.get("parameters")
-            or structured_data.get("results_list")
-            or []
-        )
-
-    else:
-        return []
-
-    if not isinstance(raw_results, list):
-        return []
-
-    normalized = []
-
-    for item in raw_results:
-
-        if not isinstance(item, dict):
-            continue
-
-        # -----------------------------------------------------
-        # Name
-        # -----------------------------------------------------
-        name = (
-            item.get("name")
-            or item.get("test_name")
-            or item.get("parameter")
-            or item.get("marker")
-            or item.get("analyte")
-        )
-
-        if not name:
-            continue
-
-        name = str(name).strip()
-
-        # -----------------------------------------------------
-        # Value
-        # -----------------------------------------------------
-        value = (
-            item.get("value")
-            if item.get("value") is not None
-            else item.get("result")
-        )
-
-        if value is None:
-            value = item.get("numeric_value")
-
-        if value is None:
-            value = item.get("measured_value")
-
-        if value is not None:
-            value = str(value).strip()
-
-        # -----------------------------------------------------
-        # Unit
-        # -----------------------------------------------------
-        unit = item.get("unit")
-
-        if unit is None:
-            unit = item.get("units")
-
-        if unit is not None:
-            unit = str(unit).strip()
-
-        # -----------------------------------------------------
-        # Reference range
-        # IMPORTANT:
-        # Current database stores this as one text field:
-        # "155000 - 440000"
-        # "up to 15.5"
-        # "<100"
-        # "30-100"
-        # etc.
-        # -----------------------------------------------------
-        reference_range = item.get("reference_range")
-
-        if reference_range is None:
-            # Backward compatibility with possible older records
-            reference_min = (
-                item.get("reference_min")
-                or item.get("ref_min")
-                or item.get("normal_min")
-                or item.get("range_min")
-                or item.get("min_reference")
-                or item.get("lower_bound")
-                or item.get("low")
-            )
-
-            reference_max = (
-                item.get("reference_max")
-                or item.get("ref_max")
-                or item.get("normal_max")
-                or item.get("range_max")
-                or item.get("max_reference")
-                or item.get("upper_bound")
-                or item.get("high")
-            )
-
-            if reference_min is not None and reference_max is not None:
-                reference_range = f"{reference_min} - {reference_max}"
-
-            elif reference_min is not None:
-                reference_range = f">= {reference_min}"
-
-            elif reference_max is not None:
-                reference_range = f"<= {reference_max}"
-
-        if reference_range is not None:
-            reference_range = str(reference_range).strip()
-
-        # -----------------------------------------------------
-        # Store normalized result
-        # -----------------------------------------------------
-        normalized.append({
-            "name": name,
-            "value": value,
-            "unit": unit,
-            "reference_range": reference_range
-        })
-
-    return normalized
-
-
-def health_report_parse_reference_range(reference_range):
-    """
-    Parse a laboratory reference range.
+    Parse reference ranges stored as text.
 
     Examples:
 
@@ -12547,211 +12159,585 @@ def health_report_parse_reference_range(reference_range):
 
         ">= 90"
             -> (90.0, None)
-
-    Returns:
-        (lower, upper)
     """
 
     if not reference_range:
+
         return None, None
 
-    text = str(reference_range).strip()
+    text = str(
+        reference_range
+    ).strip()
 
     if not text:
+
         return None, None
 
-    # Normalize common Unicode characters
+    # Normalize dash characters
+
     text = (
-        text.replace("–", "-")
-            .replace("—", "-")
-            .replace("−", "-")
+        text
+        .replace("–", "-")
+        .replace("—", "-")
+        .replace("−", "-")
     )
 
-    # ---------------------------------------------------------
-    # Case 1:
-    # "155000 - 440000"
-    # "0.5-1.2"
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
+    # Range:
+    # 155000 - 440000
+    # -----------------------------------------------------
+
     match = re.search(
-        r"(?<!\d)(-?\d+(?:\.\d+)?)\s*-\s*(-?\d+(?:\.\d+)?)(?!\d)",
+        r"(?<!\d)"
+        r"(-?\d+(?:\.\d+)?)"
+        r"\s*-\s*"
+        r"(-?\d+(?:\.\d+)?)"
+        r"(?!\d)",
         text
     )
 
     if match:
+
         try:
-            lower = float(match.group(1))
-            upper = float(match.group(2))
+
+            lower = float(
+                match.group(1)
+            )
+
+            upper = float(
+                match.group(2)
+            )
+
             return lower, upper
+
         except Exception:
+
             pass
 
-    # ---------------------------------------------------------
-    # Case 2:
-    # "up to 15.5"
-    # "up to 46"
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
+    # Upper-only:
+    #
+    # up to 15.5
+    # <100
+    # <=100
+    # -----------------------------------------------------
+
     match = re.search(
-        r"(?:up\s*to|less\s*than\s*or\s*equal\s*to|<=|<)\s*"
+        r"(?:"
+        r"up\s*to"
+        r"|less\s*than\s*or\s*equal\s*to"
+        r"|<="
+        r"|<"
+        r")\s*"
         r"(-?\d+(?:\.\d+)?)",
         text,
         flags=re.IGNORECASE
     )
 
     if match:
+
         try:
-            upper = float(match.group(1))
+
+            upper = float(
+                match.group(1)
+            )
+
             return None, upper
+
         except Exception:
+
             pass
 
-    # ---------------------------------------------------------
-    # Case 3:
-    # ">= 90"
-    # "> 90"
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
+    # Lower-only:
+    #
+    # >=90
+    # >90
+    # -----------------------------------------------------
+
     match = re.search(
-        r"(?:greater\s*than\s*or\s*equal\s*to|>=|>)\s*"
+        r"(?:"
+        r"greater\s*than\s*or\s*equal\s*to"
+        r"|>="
+        r"|>"
+        r")\s*"
         r"(-?\d+(?:\.\d+)?)",
         text,
         flags=re.IGNORECASE
     )
 
     if match:
+
         try:
-            lower = float(match.group(1))
+
+            lower = float(
+                match.group(1)
+            )
+
             return lower, None
-        except Exception:
-            pass
 
-    # ---------------------------------------------------------
-    # Case 4:
-    # A plain numeric reference range
-    # ---------------------------------------------------------
-    match = re.fullmatch(
-        r"\s*(-?\d+(?:\.\d+)?)\s*",
-        text
-    )
-
-    if match:
-        try:
-            value = float(match.group(1))
-            return value, value
         except Exception:
+
             pass
 
     return None, None
 
 
-def health_report_get_lab_status(value, reference_range):
-    """
-    Determine laboratory result status based on the reference range.
+# =========================================================
+# 8. LAB STATUS
+# =========================================================
 
-    Statuses:
+def health_report_get_lab_status(
+    value,
+    reference_range=None,
+    reference_min=None,
+    reference_max=None
+):
+    """
+    Determine laboratory result status.
+
+    Supported statuses:
+
         below
         above
         near_lower
         near_upper
         normal
         unknown
-
-    The 10% rule is applied only when both lower and upper
-    reference limits are available.
     """
 
-    if value is None or reference_range is None:
-        return "unknown"
+    if value is None:
+
+        return {
+            "status": "unknown",
+            "label": None
+        }
 
     try:
+
         numeric_value = float(
             str(value)
             .replace(",", "")
             .strip()
         )
+
     except Exception:
-        return "unknown"
 
-    lower, upper = health_report_parse_reference_range(
-        reference_range
-    )
+        return {
+            "status": "unknown",
+            "label": None
+        }
 
-    # ---------------------------------------------------------
-    # No numeric reference boundaries
-    # ---------------------------------------------------------
+    # -----------------------------------------------------
+    # If explicit min/max exist, use them.
+    # Otherwise parse reference_range.
+    # -----------------------------------------------------
+
+    if (
+        reference_min is not None
+        or reference_max is not None
+    ):
+
+        try:
+
+            lower = (
+                float(reference_min)
+                if reference_min is not None
+                else None
+            )
+
+        except Exception:
+
+            lower = None
+
+        try:
+
+            upper = (
+                float(reference_max)
+                if reference_max is not None
+                else None
+            )
+
+        except Exception:
+
+            upper = None
+
+    else:
+
+        lower, upper = (
+            health_report_parse_reference_range(
+                reference_range
+            )
+        )
+
+    # -----------------------------------------------------
+    # No numeric boundaries
+    # -----------------------------------------------------
+
     if lower is None and upper is None:
-        return "unknown"
 
-    # ---------------------------------------------------------
-    # Both lower and upper limits
-    # ---------------------------------------------------------
-    if lower is not None and upper is not None:
+        return {
+            "status": "unknown",
+            "label": None
+        }
 
-        if upper < lower:
-            lower, upper = upper, lower
+    # -----------------------------------------------------
+    # Below
+    # -----------------------------------------------------
 
-        if numeric_value < lower:
-            return "below"
+    if (
+        lower is not None
+        and numeric_value < lower
+    ):
 
-        if numeric_value > upper:
-            return "above"
+        return {
+            "status": "below",
+            "label": "پایین‌تر از محدوده"
+        }
 
-        interval = upper - lower
+    # -----------------------------------------------------
+    # Above
+    # -----------------------------------------------------
 
-        # Degenerate range
-        if interval <= 0:
-            return "normal"
+    if (
+        upper is not None
+        and numeric_value > upper
+    ):
 
-        ten_percent = interval * 0.10
+        return {
+            "status": "above",
+            "label": "بالاتر از محدوده"
+        }
 
-        if numeric_value <= lower + ten_percent:
-            return "near_lower"
+    # -----------------------------------------------------
+    # Both boundaries exist
+    # -----------------------------------------------------
 
-        if numeric_value >= upper - ten_percent:
-            return "near_upper"
+    if (
+        lower is not None
+        and upper is not None
+        and upper > lower
+    ):
 
-        return "normal"
+        interval_width = (
+            upper -
+            lower
+        )
 
-    # ---------------------------------------------------------
-    # Only upper limit exists
-    # Example:
-    # "up to 15.5"
-    # "<100"
-    # ---------------------------------------------------------
-    if upper is not None:
+        lower_boundary = (
+            lower +
+            0.10 *
+            interval_width
+        )
 
-        if numeric_value > upper:
-            return "above"
+        upper_boundary = (
+            upper -
+            0.10 *
+            interval_width
+        )
 
-        # For one-sided ranges, there is no reliable
-        # lower boundary, so do not classify "near lower".
-        return "normal"
+        if numeric_value <= lower_boundary:
 
-    # ---------------------------------------------------------
-    # Only lower limit exists
-    # Example:
-    # ">= 90"
-    # ---------------------------------------------------------
-    if lower is not None:
+            return {
+                "status": "near_lower",
+                "label":
+                    "نزدیک به حد پایین محدوده"
+            }
 
-        if numeric_value < lower:
-            return "below"
+        if numeric_value >= upper_boundary:
 
-        return "normal"
+            return {
+                "status": "near_upper",
+                "label":
+                    "نزدیک به حد بالای محدوده"
+            }
 
-    return "unknown"
+    # -----------------------------------------------------
+    # Normal
+    # -----------------------------------------------------
+
+    return {
+        "status": "normal",
+        "label": None
+    }
+
+
 # =========================================================
-# 9. GET LAB RECORDS
+# 9. EXTRACT LAB VALUES
 # =========================================================
 
-def health_report_get_lab_records(user_id):
+def health_report_extract_lab_values(
+    structured_data
+):
     """
-    Retrieve laboratory test records for the health report.
+    Extract laboratory results from the actual
+    Mahroo JSON structure.
 
-    Mahroo stores laboratory records with:
+    Current database structure:
+
+    {
+        "results": [
+            {
+                "name": "...",
+                "unit": "...",
+                "value": "...",
+                "reference_range": "..."
+            }
+        ],
+        "test_date": "...",
+        "laboratory": "..."
+    }
+    """
+
+    if not structured_data:
+
+        return []
+
+    # -----------------------------------------------------
+    # JSON may sometimes arrive as a string
+    # -----------------------------------------------------
+
+    if isinstance(
+        structured_data,
+        str
+    ):
+
+        try:
+
+            structured_data = json.loads(
+                structured_data
+            )
+
+        except Exception:
+
+            return []
+
+    # -----------------------------------------------------
+    # Determine raw results
+    # -----------------------------------------------------
+
+    if isinstance(
+        structured_data,
+        list
+    ):
+
+        raw_results = (
+            structured_data
+        )
+
+    elif isinstance(
+        structured_data,
+        dict
+    ):
+
+        raw_results = (
+            structured_data.get(
+                "results"
+            )
+            or
+            structured_data.get(
+                "lab_results"
+            )
+            or
+            structured_data.get(
+                "tests"
+            )
+            or
+            structured_data.get(
+                "values"
+            )
+            or
+            structured_data.get(
+                "parameters"
+            )
+            or
+            structured_data.get(
+                "results_list"
+            )
+            or
+            []
+        )
+
+    else:
+
+        return []
+
+    if not isinstance(
+        raw_results,
+        list
+    ):
+
+        return []
+
+    normalized = []
+
+    for item in raw_results:
+
+        if not isinstance(
+            item,
+            dict
+        ):
+
+            continue
+
+        # -------------------------------------------------
+        # Name
+        # -------------------------------------------------
+
+        name = (
+            item.get("name")
+            or
+            item.get("test_name")
+            or
+            item.get("parameter")
+            or
+            item.get("marker")
+            or
+            item.get("analyte")
+        )
+
+        if not name:
+
+            continue
+
+        name = str(
+            name
+        ).strip()
+
+        # -------------------------------------------------
+        # Value
+        # -------------------------------------------------
+
+        value = (
+            item.get("value")
+            if item.get("value") is not None
+            else item.get("result")
+        )
+
+        if value is None:
+
+            value = item.get(
+                "numeric_value"
+            )
+
+        if value is None:
+
+            value = item.get(
+                "measured_value"
+            )
+
+        if value is not None:
+
+            value = str(
+                value
+            ).strip()
+
+        # -------------------------------------------------
+        # Unit
+        # -------------------------------------------------
+
+        unit = (
+            item.get("unit")
+            or
+            item.get("units")
+        )
+
+        if unit is not None:
+
+            unit = str(
+                unit
+            ).strip()
+
+        # -------------------------------------------------
+        # Reference range
+        # -------------------------------------------------
+
+        reference_range = (
+            item.get(
+                "reference_range"
+            )
+        )
+
+        if reference_range is not None:
+
+            reference_range = str(
+                reference_range
+            ).strip()
+
+        # -------------------------------------------------
+        # Parse reference range
+        # -------------------------------------------------
+
+        reference_min, reference_max = (
+            health_report_parse_reference_range(
+                reference_range
+            )
+        )
+
+        # -------------------------------------------------
+        # Calculate status
+        # -------------------------------------------------
+
+        status_info = (
+            health_report_get_lab_status(
+                value=value,
+                reference_range=reference_range,
+                reference_min=reference_min,
+                reference_max=reference_max
+            )
+        )
+
+        # -------------------------------------------------
+        # Save normalized result
+        # -------------------------------------------------
+
+        normalized.append({
+
+            "name":
+                name,
+
+            "value":
+                value,
+
+            "unit":
+                unit,
+
+            "reference_range":
+                reference_range,
+
+            "reference_min":
+                reference_min,
+
+            "reference_max":
+                reference_max,
+
+            "status":
+                status_info["status"],
+
+            "status_label":
+                status_info["label"]
+        })
+
+    return normalized
+
+
+# =========================================================
+# 10. GET LAB RECORDS
+# =========================================================
+
+def health_report_get_lab_records(
+    user_id
+):
+    """
+    Mahroo laboratory records use:
+
         record_type = 'laboratory_test'
     """
 
     with get_db_connection() as conn:
+
         with conn.cursor() as cur:
+
             cur.execute("""
                 SELECT
                     id,
@@ -12775,22 +12761,39 @@ def health_report_get_lab_records(user_id):
     records = []
 
     for row in rows:
+
         records.append({
-            "id": row[0],
-            "record_type": row[1],
-            "record_date": row[2],
-            "title": row[3],
-            "extracted_text": row[4],
-            "structured_data": row[5],
-            "user_confirmed": row[6],
-            "notes": row[7],
+
+            "id":
+                row[0],
+
+            "record_type":
+                row[1],
+
+            "record_date":
+                row[2],
+
+            "title":
+                row[3],
+
+            "extracted_text":
+                row[4],
+
+            "structured_data":
+                row[5],
+
+            "user_confirmed":
+                row[6],
+
+            "notes":
+                row[7]
         })
 
     return records
 
 
 # =========================================================
-# 10. NORMALIZE LAB NAME
+# 11. NORMALIZE LAB NAME
 # =========================================================
 
 def health_report_normalize_lab_name(
@@ -12813,12 +12816,7 @@ def health_report_normalize_lab_name(
 
 
 # =========================================================
-# 11. BUILD LAB TRENDS
-# =========================================================
-#
-# اگر یک پارامتر در چند آزمایش تکرار شده باشد،
-# مقادیر آن برای نمایش روند جمع‌آوری می‌شوند.
-#
+# 12. BUILD LAB TRENDS
 # =========================================================
 
 def health_report_build_lab_trends(
@@ -12835,9 +12833,14 @@ def health_report_build_lab_trends(
             )
         )
 
+        # IMPORTANT:
+        # extract from structured_data,
+        # not from the entire record.
         values = (
             health_report_extract_lab_values(
-                record
+                record.get(
+                    "structured_data"
+                )
             )
         )
 
@@ -12861,10 +12864,7 @@ def health_report_build_lab_trends(
 
                 continue
 
-            if (
-                normalized_name
-                not in trends
-            ):
+            if normalized_name not in trends:
 
                 trends[
                     normalized_name
@@ -12903,9 +12903,7 @@ def health_report_build_lab_trends(
 
     repeated = {}
 
-    for key, item in (
-        trends.items()
-    ):
+    for key, item in trends.items():
 
         if len(
             item["values"]
@@ -12917,7 +12915,7 @@ def health_report_build_lab_trends(
 
 
 # =========================================================
-# 12. FORMAT PROFILE
+# 13. FORMAT PROFILE
 # =========================================================
 
 def health_report_format_profile(
@@ -13008,13 +13006,7 @@ def health_report_format_profile(
 
 
 # =========================================================
-# 13. FORMAT LAB RESULTS
-# =========================================================
-#
-# این تابع فقط نتایج آزمایش را نمایش می‌دهد.
-#
-# نکات قابل توجه آزمایش در تابع جداگانه نمایش داده می‌شوند.
-#
+# 14. FORMAT LAB RESULTS
 # =========================================================
 
 def health_report_format_labs(
@@ -13069,24 +13061,22 @@ def health_report_format_labs(
 
         values = (
             health_report_extract_lab_values(
-                record
+                record.get(
+                    "structured_data"
+                )
             )
         )
 
         if not values:
 
             lines.append(
-                "اطلاعات عددی قابل نمایش "
-                "برای این آزمایش ثبت نشده است."
+                "اطلاعات آزمایش "
+                "قابل نمایش نیست."
             )
 
             lines.append("")
 
             continue
-
-        # -------------------------------------------------
-        # نمایش نتایج
-        # -------------------------------------------------
 
         for item in values:
 
@@ -13126,28 +13116,20 @@ def health_report_format_labs(
             )
 
             # -------------------------------------------------
-            # محدوده مرجع
+            # Reference range
             # -------------------------------------------------
 
-            ref_min = item.get(
-                "reference_min"
+            reference_range = (
+                item.get(
+                    "reference_range"
+                )
             )
 
-            ref_max = item.get(
-                "reference_max"
-            )
-
-            if (
-                ref_min is not None
-                and
-                ref_max is not None
-            ):
+            if reference_range:
 
                 lines.append(
                     "  محدوده مرجع: "
-                    f"{health_report_format_value(ref_min)}"
-                    " تا "
-                    f"{health_report_format_value(ref_max)}"
+                    f"{reference_range}"
                 )
 
         lines.append("")
@@ -13158,18 +13140,7 @@ def health_report_format_labs(
 
 
 # =========================================================
-# 14. FORMAT NOTABLE LAB POINTS
-# =========================================================
-#
-# فقط موارد زیر نمایش داده می‌شوند:
-#
-# 1) پایین‌تر از محدوده
-# 2) بالاتر از محدوده
-# 3) نزدیک به حد پایین
-# 4) نزدیک به حد بالا
-#
-# مقادیر عادی و وسط محدوده نمایش داده نمی‌شوند.
-#
+# 15. FORMAT NOTABLE LAB POINTS
 # =========================================================
 
 def health_report_format_lab_notable_points(
@@ -13192,7 +13163,9 @@ def health_report_format_lab_notable_points(
 
         values = (
             health_report_extract_lab_values(
-                record
+                record.get(
+                    "structured_data"
+                )
             )
         )
 
@@ -13245,7 +13218,7 @@ def health_report_format_lab_notable_points(
             })
 
     # -----------------------------------------------------
-    # اگر هیچ مورد قابل توجهی وجود نداشت
+    # No notable values
     # -----------------------------------------------------
 
     if not notable_items:
@@ -13339,7 +13312,7 @@ def health_report_format_lab_notable_points(
 
 
 # =========================================================
-# 15. FORMAT REPEATED LAB TRENDS
+# 16. FORMAT REPEATED LAB TRENDS
 # =========================================================
 
 def health_report_format_lab_trends(
@@ -13364,9 +13337,7 @@ def health_report_format_lab_trends(
 
     lines.append("")
 
-    for _, item in (
-        trends.items()
-    ):
+    for _, item in trends.items():
 
         name = item[
             "name"
@@ -13375,10 +13346,6 @@ def health_report_format_lab_trends(
         lines.append(
             f"• {name}"
         )
-
-        # -------------------------------------------------
-        # مرتب‌سازی از قدیمی به جدید
-        # -------------------------------------------------
 
         values = sorted(
 
@@ -13444,32 +13411,12 @@ def health_report_format_lab_trends(
 
 
 # =========================================================
-# 16. BUILD COMPLETE HEALTH REPORT
-# =========================================================
-#
-# ترتیب نهایی گزارش:
-#
-# 📋 گزارش سلامت من
-#
-# 👤 اطلاعات پایه
-#
-# 🧪 نتایج آزمایش‌ها
-#
-# 💊 وضعیت داروها
-#
-# ⚠️ نکات قابل توجه آزمایش
-#
-# 📈 روند آزمایش‌های تکرارشده
-#
+# 17. BUILD COMPLETE HEALTH REPORT
 # =========================================================
 
 def health_report_build(
     user_id
 ):
-
-    # -----------------------------------------------------
-    # دریافت اطلاعات پروفایل
-    # -----------------------------------------------------
 
     profile = (
         health_report_get_profile(
@@ -13477,19 +13424,11 @@ def health_report_build(
         )
     )
 
-    # -----------------------------------------------------
-    # دریافت اطلاعات آزمایش‌ها
-    # -----------------------------------------------------
-
     lab_records = (
         health_report_get_lab_records(
             user_id
         )
     )
-
-    # -----------------------------------------------------
-    # بخش داروها
-    # -----------------------------------------------------
 
     medication_text = (
         health_report_build_medications(
@@ -13497,15 +13436,7 @@ def health_report_build(
         )
     )
 
-    # -----------------------------------------------------
-    # ساخت بخش‌ها
-    # -----------------------------------------------------
-
     sections = []
-
-    # -----------------------------------------------------
-    # عنوان
-    # -----------------------------------------------------
 
     sections.append(
         "📋 گزارش سلامت من"
@@ -13517,7 +13448,7 @@ def health_report_build(
     )
 
     # -----------------------------------------------------
-    # 1. اطلاعات پایه
+    # 1. Profile
     # -----------------------------------------------------
 
     sections.append(
@@ -13527,7 +13458,7 @@ def health_report_build(
     )
 
     # -----------------------------------------------------
-    # 2. نتایج آزمایش‌ها
+    # 2. Labs
     # -----------------------------------------------------
 
     sections.append(
@@ -13537,7 +13468,7 @@ def health_report_build(
     )
 
     # -----------------------------------------------------
-    # 3. وضعیت داروها
+    # 3. Medications
     # -----------------------------------------------------
 
     sections.append(
@@ -13545,7 +13476,7 @@ def health_report_build(
     )
 
     # -----------------------------------------------------
-    # 4. نکات قابل توجه آزمایش
+    # 4. Notable lab points
     # -----------------------------------------------------
 
     notable_text = (
@@ -13561,7 +13492,7 @@ def health_report_build(
         )
 
     # -----------------------------------------------------
-    # 5. روند آزمایش‌های تکرارشده
+    # 5. Repeated lab trends
     # -----------------------------------------------------
 
     trend_text = (
@@ -13576,17 +13507,13 @@ def health_report_build(
             trend_text
         )
 
-    # -----------------------------------------------------
-    # خروجی نهایی
-    # -----------------------------------------------------
-
     return "\n\n".join(
         sections
     )
 
 
 # =========================================================
-# 17. SEND HEALTH REPORT
+# 18. SEND HEALTH REPORT
 # =========================================================
 
 def send_health_report(
