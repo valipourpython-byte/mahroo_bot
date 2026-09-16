@@ -11726,14 +11726,13 @@ print(
 #
 # گزارش سلامت یکپارچه کاربر
 #
-# شامل:
+# ساختار گزارش:
+#
 # 1) اطلاعات پایه پروفایل
-# 2) داروهای فعال
-# 3) میزان پایبندی به هر دارو
-# 4) آخرین نتایج آزمایش
-# 5) محدوده مرجع آزمایش
-# 6) نکات قابل توجه آزمایش
-# 7) روند آزمایش‌های تکرارشده
+# 2) نتایج آزمایش‌ها
+# 3) وضعیت داروهای فعال
+# 4) نکات قابل توجه آزمایش
+# 5) روند آزمایش‌های تکرارشده
 #
 # نکته:
 # این ماژول فقط اطلاعات موجود در دیتابیس را می‌خواند
@@ -11759,7 +11758,11 @@ def health_report_format_value(value):
         if value.is_integer():
             return str(int(value))
 
-        return f"{value:.2f}".rstrip("0").rstrip(".")
+        return (
+            f"{value:.2f}"
+            .rstrip("0")
+            .rstrip(".")
+        )
 
     return str(value)
 
@@ -11772,11 +11775,15 @@ def health_report_format_date(value):
     try:
 
         if hasattr(value, "strftime"):
-            return value.strftime("%Y/%m/%d")
+
+            return value.strftime(
+                "%Y/%m/%d"
+            )
 
         text = str(value)
 
         if "T" in text:
+
             text = text.split("T")[0]
 
         if "-" in text:
@@ -11784,7 +11791,12 @@ def health_report_format_date(value):
             parts = text.split("-")
 
             if len(parts) == 3:
-                return f"{parts[0]}/{parts[1]}/{parts[2]}"
+
+                return (
+                    f"{parts[0]}/"
+                    f"{parts[1]}/"
+                    f"{parts[2]}"
+                )
 
         return text
 
@@ -11819,14 +11831,21 @@ def health_report_get_profile(user_id):
             row = cur.fetchone()
 
     if not row:
+
         return None
 
     return {
+
         "full_name": row[0],
+
         "birth_date": row[1],
+
         "gender": row[2],
+
         "allergies": row[3],
+
         "medical_history": row[4],
+
         "important_notes": row[5]
     }
 
@@ -11835,7 +11854,9 @@ def health_report_get_profile(user_id):
 # 3. ACTIVE MEDICATIONS
 # =========================================================
 
-def health_report_get_active_medications(user_id):
+def health_report_get_active_medications(
+    user_id
+):
 
     with get_db_connection() as conn:
 
@@ -11862,11 +11883,17 @@ def health_report_get_active_medications(user_id):
     for row in rows:
 
         medications.append({
+
             "id": row[0],
+
             "name": row[1],
+
             "doses_per_day": row[2],
+
             "number_of_doses": row[3],
+
             "start_date": row[4],
+
             "end_date": row[5]
         })
 
@@ -11877,7 +11904,9 @@ def health_report_get_active_medications(user_id):
 # 4. MEDICATION SCHEDULES
 # =========================================================
 
-def health_report_get_medication_schedules(medication_id):
+def health_report_get_medication_schedules(
+    medication_id
+):
 
     with get_db_connection() as conn:
 
@@ -11909,15 +11938,19 @@ def health_report_get_medication_schedules(medication_id):
 # taken
 # not_taken
 #
-# وضعیت‌هایی مثل:
+# وضعیت‌های زیر وارد محاسبه نمی‌شوند:
+#
 # pending
 # sent
 # snoozed
 #
-# وارد مخرج محاسبه نمی‌شوند.
+# بنابراین Reminder نادیده‌گرفته‌شده،
+# به‌عنوان not_taken محسوب نمی‌شود.
 #
-# بنابراین اگر کاربر Reminder را نادیده بگیرد،
-# آن Reminder به‌عنوان not_taken محسوب نمی‌شود.
+# فرمول:
+#
+# adherence =
+# taken / (taken + not_taken) * 100
 #
 # =========================================================
 
@@ -11950,11 +11983,13 @@ def health_report_get_medication_adherence(
             rows = cur.fetchall()
 
     taken = 0
+
     not_taken = 0
 
     for row in rows:
 
         status = row[0]
+
         count = row[1]
 
         if status == "taken":
@@ -11965,7 +12000,10 @@ def health_report_get_medication_adherence(
 
             not_taken = count
 
-    completed_total = taken + not_taken
+    completed_total = (
+        taken +
+        not_taken
+    )
 
     if completed_total > 0:
 
@@ -11979,9 +12017,13 @@ def health_report_get_medication_adherence(
         adherence = None
 
     return {
+
         "taken": taken,
+
         "not_taken": not_taken,
+
         "completed_total": completed_total,
+
         "adherence": adherence
     }
 
@@ -11994,8 +12036,10 @@ def health_report_build_medications(
     user_id
 ):
 
-    medications = health_report_get_active_medications(
-        user_id
+    medications = (
+        health_report_get_active_medications(
+            user_id
+        )
     )
 
     if not medications:
@@ -12007,13 +12051,21 @@ def health_report_build_medications(
 
     lines = []
 
-    lines.append("💊 وضعیت داروها")
+    lines.append(
+        "💊 وضعیت داروها"
+    )
+
     lines.append("")
 
     for medication in medications:
 
-        medication_id = medication["id"]
-        medication_name = medication["name"]
+        medication_id = (
+            medication["id"]
+        )
+
+        medication_name = (
+            medication["name"]
+        )
 
         adherence = (
             health_report_get_medication_adherence(
@@ -12028,37 +12080,58 @@ def health_report_build_medications(
             )
         )
 
+        # -------------------------------------------------
+        # نام دارو
+        # -------------------------------------------------
+
         lines.append(
             f"💊 {medication_name}"
         )
 
+        # -------------------------------------------------
+        # تعداد نوبت روزانه
+        # -------------------------------------------------
+
         if schedules:
 
             lines.append(
-                f"تعداد نوبت‌های برنامه‌ریزی‌شده: "
+                "تعداد نوبت‌های برنامه‌ریزی‌شده: "
                 f"{len(schedules)} نوبت در روز"
             )
 
-        elif medication.get("doses_per_day"):
+        elif medication.get(
+            "doses_per_day"
+        ):
 
             lines.append(
-                f"تعداد نوبت‌های برنامه‌ریزی‌شده: "
+                "تعداد نوبت‌های برنامه‌ریزی‌شده: "
                 f"{medication['doses_per_day']} نوبت در روز"
             )
 
         else:
 
             lines.append(
-                "تعداد نوبت‌های برنامه‌ریزی‌شده: ثبت نشده"
+                "تعداد نوبت‌های برنامه‌ریزی‌شده: "
+                "ثبت نشده"
             )
 
+        # -------------------------------------------------
+        # مصرف
+        # -------------------------------------------------
+
         lines.append(
-            f"مصرف‌شده: {adherence['taken']}"
+            f"مصرف‌شده: "
+            f"{adherence['taken']}"
         )
 
         lines.append(
-            f"مصرف‌نشده: {adherence['not_taken']}"
+            f"مصرف‌نشده: "
+            f"{adherence['not_taken']}"
         )
+
+        # -------------------------------------------------
+        # پایبندی
+        # -------------------------------------------------
 
         if adherence["adherence"] is not None:
 
@@ -12074,7 +12147,13 @@ def health_report_build_medications(
                 "هنوز اطلاعات کافی ثبت نشده است."
             )
 
-        if medication.get("start_date"):
+        # -------------------------------------------------
+        # تاریخ شروع
+        # -------------------------------------------------
+
+        if medication.get(
+            "start_date"
+        ):
 
             lines.append(
                 "شروع مصرف: "
@@ -12083,7 +12162,13 @@ def health_report_build_medications(
                 )
             )
 
-        if medication.get("end_date"):
+        # -------------------------------------------------
+        # تاریخ پایان
+        # -------------------------------------------------
+
+        if medication.get(
+            "end_date"
+        ):
 
             lines.append(
                 "پایان مصرف: "
@@ -12094,11 +12179,32 @@ def health_report_build_medications(
 
         lines.append("")
 
-    return "\n".join(lines).rstrip()
+    return "\n".join(
+        lines
+    ).rstrip()
 
 
 # =========================================================
 # 7. LAB STATUS
+# =========================================================
+#
+# وضعیت آزمایش بر اساس محدوده مرجع همان آزمایش:
+#
+# value < reference_min
+#       → پایین‌تر از محدوده
+#
+# value > reference_max
+#       → بالاتر از محدوده
+#
+# 10% ابتدایی محدوده
+#       → نزدیک به حد پایین
+#
+# 10% انتهایی محدوده
+#       → نزدیک به حد بالا
+#
+# سایر مقادیر داخل محدوده
+#       → بدون نکته قابل توجه
+#
 # =========================================================
 
 def health_report_get_lab_status(
@@ -12108,11 +12214,14 @@ def health_report_get_lab_status(
 ):
 
     if value is None:
+
         return None
 
     try:
 
-        numeric_value = float(value)
+        numeric_value = float(
+            value
+        )
 
     except Exception:
 
@@ -12143,7 +12252,7 @@ def health_report_get_lab_status(
         upper = None
 
     # -----------------------------------------------------
-    # خارج از محدوده
+    # پایین‌تر از محدوده
     # -----------------------------------------------------
 
     if lower is not None:
@@ -12151,21 +12260,31 @@ def health_report_get_lab_status(
         if numeric_value < lower:
 
             return {
+
                 "status": "below",
-                "label": "پایین‌تر از محدوده"
+
+                "label":
+                    "پایین‌تر از محدوده"
             }
+
+    # -----------------------------------------------------
+    # بالاتر از محدوده
+    # -----------------------------------------------------
 
     if upper is not None:
 
         if numeric_value > upper:
 
             return {
+
                 "status": "above",
-                "label": "بالاتر از محدوده"
+
+                "label":
+                    "بالاتر از محدوده"
             }
 
     # -----------------------------------------------------
-    # نزدیک به حد پایین
+    # بررسی نزدیکی به مرزها
     # -----------------------------------------------------
 
     if (
@@ -12174,34 +12293,61 @@ def health_report_get_lab_status(
         and upper > lower
     ):
 
-        interval_width = upper - lower
+        interval_width = (
+            upper -
+            lower
+        )
 
         lower_boundary = (
             lower +
-            (0.10 * interval_width)
+            (
+                0.10 *
+                interval_width
+            )
         )
 
         upper_boundary = (
             upper -
-            (0.10 * interval_width)
+            (
+                0.10 *
+                interval_width
+            )
         )
+
+        # نزدیک به حد پایین
 
         if numeric_value <= lower_boundary:
 
             return {
-                "status": "near_lower",
-                "label": "نزدیک به حد پایین محدوده"
+
+                "status":
+                    "near_lower",
+
+                "label":
+                    "نزدیک به حد پایین محدوده"
             }
+
+        # نزدیک به حد بالا
 
         if numeric_value >= upper_boundary:
 
             return {
-                "status": "near_upper",
-                "label": "نزدیک به حد بالای محدوده"
+
+                "status":
+                    "near_upper",
+
+                "label":
+                    "نزدیک به حد بالای محدوده"
             }
 
+    # -----------------------------------------------------
+    # داخل محدوده و دور از مرزها
+    # -----------------------------------------------------
+
     return {
+
         "status": "normal",
+
         "label": None
     }
 
@@ -12210,32 +12356,48 @@ def health_report_get_lab_status(
 # 8. EXTRACT NUMERIC LAB VALUES
 # =========================================================
 #
-# این تابع با چند نام احتمالی برای فیلدهای JSON کار می‌کند
-# تا اگر ساختار JSON کمی متفاوت بود، باز هم بتواند اطلاعات
-# را استخراج کند.
+# این تابع ساختارهای مختلف JSON را پشتیبانی می‌کند.
+#
+# اطلاعات مورد نیاز:
+#
+# name
+# value
+# unit
+# reference_min
+# reference_max
 #
 # =========================================================
 
-def health_report_extract_lab_values(record):
+def health_report_extract_lab_values(
+    record
+):
 
-    structured_data = record.get(
-        "structured_data"
+    structured_data = (
+        record.get(
+            "structured_data"
+        )
     )
 
     if not structured_data:
 
         return []
 
-    # -----------------------------------------------------
+    # =====================================================
     # اگر structured_data مستقیماً لیست باشد
-    # -----------------------------------------------------
+    # =====================================================
 
     if isinstance(
         structured_data,
         list
     ):
 
-        raw_values = structured_data
+        raw_values = (
+            structured_data
+        )
+
+    # =====================================================
+    # اگر structured_data دیکشنری باشد
+    # =====================================================
 
     elif isinstance(
         structured_data,
@@ -12245,44 +12407,69 @@ def health_report_extract_lab_values(record):
         raw_values = None
 
         possible_keys = [
+
             "results",
+
             "lab_results",
+
             "tests",
+
             "values",
+
             "parameters",
+
             "results_list"
         ]
 
         for key in possible_keys:
 
-            candidate = structured_data.get(key)
+            candidate = (
+                structured_data.get(
+                    key
+                )
+            )
 
-            if isinstance(candidate, list):
+            if isinstance(
+                candidate,
+                list
+            ):
 
                 raw_values = candidate
+
                 break
+
+        # -------------------------------------------------
+        # اگر هیچ لیستی پیدا نشد
+        # -------------------------------------------------
 
         if raw_values is None:
 
-            # بعضی مدل‌ها ممکن است داده را داخل
-            # یک کلید واحد ذخیره کنند.
-
             raw_values = []
 
-            for key, value in structured_data.items():
+            for key, value in (
+                structured_data.items()
+            ):
 
-                if isinstance(value, dict):
+                if isinstance(
+                    value,
+                    dict
+                ):
 
-                    item = value.copy()
+                    item = (
+                        value.copy()
+                    )
 
                     if (
                         "name" not in item
-                        and "test_name" not in item
+                        and
+                        "test_name" not in item
                     ):
 
                         item["name"] = key
 
-                    raw_values.append(item)
+                    raw_values.append(
+                        item
+                    )
 
     else:
 
@@ -12290,9 +12477,16 @@ def health_report_extract_lab_values(record):
 
     results = []
 
+    # =====================================================
+    # پردازش هر نتیجه
+    # =====================================================
+
     for item in raw_values:
 
-        if not isinstance(item, dict):
+        if not isinstance(
+            item,
+            dict
+        ):
 
             continue
 
@@ -12303,16 +12497,26 @@ def health_report_extract_lab_values(record):
         name = None
 
         for key in [
+
             "name",
+
             "test_name",
+
             "parameter",
+
             "marker",
+
             "analyte"
         ]:
 
-            if item.get(key) is not None:
+            if item.get(
+                key
+            ) is not None:
 
-                name = item.get(key)
+                name = item.get(
+                    key
+                )
+
                 break
 
         # -------------------------------------------------
@@ -12322,18 +12526,31 @@ def health_report_extract_lab_values(record):
         value = None
 
         for key in [
+
             "value",
+
             "result",
+
             "numeric_value",
+
             "measured_value"
         ]:
 
-            if item.get(key) is not None:
+            if item.get(
+                key
+            ) is not None:
 
-                value = item.get(key)
+                value = item.get(
+                    key
+                )
+
                 break
 
-        if name is None or value is None:
+        if (
+            name is None
+            or
+            value is None
+        ):
 
             continue
 
@@ -12344,90 +12561,130 @@ def health_report_extract_lab_values(record):
         unit = None
 
         for key in [
+
             "unit",
+
             "units"
         ]:
 
-            if item.get(key) is not None:
+            if item.get(
+                key
+            ) is not None:
 
-                unit = item.get(key)
+                unit = item.get(
+                    key
+                )
+
                 break
 
         # -------------------------------------------------
-        # حد پایین
+        # حد پایین مرجع
         # -------------------------------------------------
 
         reference_min = None
 
         for key in [
+
             "reference_min",
+
             "ref_min",
+
             "normal_min",
+
             "range_min",
+
             "min_reference",
+
             "lower_bound",
+
             "low"
         ]:
 
-            if item.get(key) is not None:
+            if item.get(
+                key
+            ) is not None:
 
-                reference_min = item.get(key)
+                reference_min = item.get(
+                    key
+                )
+
                 break
 
         # -------------------------------------------------
-        # حد بالا
+        # حد بالای مرجع
         # -------------------------------------------------
 
         reference_max = None
 
         for key in [
+
             "reference_max",
+
             "ref_max",
+
             "normal_max",
+
             "range_max",
+
             "max_reference",
+
             "upper_bound",
+
             "high"
         ]:
 
-            if item.get(key) is not None:
+            if item.get(
+                key
+            ) is not None:
 
-                reference_max = item.get(key)
+                reference_max = item.get(
+                    key
+                )
+
                 break
 
         # -------------------------------------------------
-        # وضعیت
-        # -----------------------------------------------------
+        # تعیین وضعیت
+        # -------------------------------------------------
 
-        status = health_report_get_lab_status(
-            value=value,
-            reference_min=reference_min,
-            reference_max=reference_max
+        status = (
+            health_report_get_lab_status(
+                value=value,
+                reference_min=reference_min,
+                reference_max=reference_max
+            )
         )
 
         results.append({
 
-            "name": str(name),
+            "name":
+                str(name),
 
-            "value": value,
+            "value":
+                value,
 
-            "unit": unit,
+            "unit":
+                unit,
 
-            "reference_min": reference_min,
+            "reference_min":
+                reference_min,
 
-            "reference_max": reference_max,
+            "reference_max":
+                reference_max,
 
-            "status": (
-                status["status"]
-                if status
-                else None
-            ),
+            "status":
+                (
+                    status["status"]
+                    if status
+                    else None
+                ),
 
-            "status_label": (
-                status["label"]
-                if status
-                else None
-            )
+            "status_label":
+                (
+                    status["label"]
+                    if status
+                    else None
+                )
         })
 
     return results
@@ -12437,7 +12694,9 @@ def health_report_extract_lab_values(record):
 # 9. GET LAB RECORDS
 # =========================================================
 
-def health_report_get_lab_records(user_id):
+def health_report_get_lab_records(
+    user_id
+):
 
     with get_db_connection() as conn:
 
@@ -12493,15 +12752,17 @@ def health_report_get_lab_records(user_id):
 # 10. NORMALIZE LAB NAME
 # =========================================================
 
-def health_report_normalize_lab_name(name):
+def health_report_normalize_lab_name(
+    name
+):
 
     if name is None:
 
         return ""
 
-    text = str(name).strip().lower()
-
-    # حذف فاصله‌های اضافی
+    text = str(
+        name
+    ).strip().lower()
 
     text = " ".join(
         text.split()
@@ -12519,14 +12780,18 @@ def health_report_normalize_lab_name(name):
 #
 # =========================================================
 
-def health_report_build_lab_trends(records):
+def health_report_build_lab_trends(
+    records
+):
 
     trends = {}
 
     for record in records:
 
-        record_date = record.get(
-            "record_date"
+        record_date = (
+            record.get(
+                "record_date"
+            )
         )
 
         values = (
@@ -12537,7 +12802,9 @@ def health_report_build_lab_trends(records):
 
         for item in values:
 
-            name = item.get("name")
+            name = item.get(
+                "name"
+            )
 
             if not name:
 
@@ -12553,30 +12820,55 @@ def health_report_build_lab_trends(records):
 
                 continue
 
-            if normalized_name not in trends:
+            if (
+                normalized_name
+                not in trends
+            ):
 
-                trends[normalized_name] = {
-                    "name": name,
-                    "values": []
+                trends[
+                    normalized_name
+                ] = {
+
+                    "name":
+                        name,
+
+                    "values":
+                        []
                 }
 
-            trends[normalized_name]["values"].append({
+            trends[
+                normalized_name
+            ][
+                "values"
+            ].append({
 
-                "date": record_date,
+                "date":
+                    record_date,
 
-                "value": item.get("value"),
+                "value":
+                    item.get(
+                        "value"
+                    ),
 
-                "unit": item.get("unit")
+                "unit":
+                    item.get(
+                        "unit"
+                    )
             })
 
-    # فقط پارامترهایی که حداقل دو بار
-    # در آزمایش‌های مختلف دیده شده‌اند.
+    # -----------------------------------------------------
+    # فقط پارامترهای تکرارشده
+    # -----------------------------------------------------
 
     repeated = {}
 
-    for key, item in trends.items():
+    for key, item in (
+        trends.items()
+    ):
 
-        if len(item["values"]) >= 2:
+        if len(
+            item["values"]
+        ) >= 2:
 
             repeated[key] = item
 
@@ -12587,70 +12879,106 @@ def health_report_build_lab_trends(records):
 # 12. FORMAT PROFILE
 # =========================================================
 
-def health_report_format_profile(profile):
+def health_report_format_profile(
+    profile
+):
 
     lines = []
 
-    lines.append("👤 اطلاعات پایه")
+    lines.append(
+        "👤 اطلاعات پایه"
+    )
+
     lines.append("")
 
     if not profile:
 
         lines.append(
-            "اطلاعات پروفایل سلامت هنوز ثبت نشده است."
+            "اطلاعات پروفایل سلامت "
+            "هنوز ثبت نشده است."
         )
 
-        return "\n".join(lines)
+        return "\n".join(
+            lines
+        )
 
-    if profile.get("full_name"):
+    if profile.get(
+        "full_name"
+    ):
 
         lines.append(
-            f"نام: {profile['full_name']}"
+            f"نام: "
+            f"{profile['full_name']}"
         )
 
-    if profile.get("birth_date"):
+    if profile.get(
+        "birth_date"
+    ):
 
         lines.append(
             "تاریخ تولد: "
-            + health_report_format_date(
-                profile["birth_date"]
+            +
+            health_report_format_date(
+                profile[
+                    "birth_date"
+                ]
             )
         )
 
-    if profile.get("gender"):
+    if profile.get(
+        "gender"
+    ):
 
         lines.append(
-            f"جنسیت: {profile['gender']}"
+            f"جنسیت: "
+            f"{profile['gender']}"
         )
 
-    if profile.get("allergies"):
+    if profile.get(
+        "allergies"
+    ):
 
         lines.append(
-            f"حساسیت‌ها: {profile['allergies']}"
+            f"حساسیت‌ها: "
+            f"{profile['allergies']}"
         )
 
-    if profile.get("medical_history"):
+    if profile.get(
+        "medical_history"
+    ):
 
         lines.append(
             "سابقه پزشکی: "
             f"{profile['medical_history']}"
         )
 
-    if profile.get("important_notes"):
+    if profile.get(
+        "important_notes"
+    ):
 
         lines.append(
             "نکات مهم: "
             f"{profile['important_notes']}"
         )
 
-    return "\n".join(lines)
+    return "\n".join(
+        lines
+    )
 
 
 # =========================================================
 # 13. FORMAT LAB RESULTS
 # =========================================================
+#
+# این تابع فقط نتایج آزمایش را نمایش می‌دهد.
+#
+# نکات قابل توجه آزمایش در تابع جداگانه نمایش داده می‌شوند.
+#
+# =========================================================
 
-def health_report_format_labs(records):
+def health_report_format_labs(
+    records
+):
 
     if not records:
 
@@ -12669,13 +12997,19 @@ def health_report_format_labs(records):
 
     for record in records:
 
-        title = record.get(
-            "title"
-        ) or "آزمایش"
+        title = (
+            record.get(
+                "title"
+            )
+            or
+            "آزمایش"
+        )
 
         record_date = (
             health_report_format_date(
-                record.get("record_date")
+                record.get(
+                    "record_date"
+                )
             )
         )
 
@@ -12683,10 +13017,13 @@ def health_report_format_labs(records):
             f"🧪 {title}"
         )
 
-        if record.get("record_date"):
+        if record.get(
+            "record_date"
+        ):
 
             lines.append(
-                f"تاریخ: {record_date}"
+                f"تاریخ: "
+                f"{record_date}"
             )
 
         values = (
@@ -12707,18 +13044,25 @@ def health_report_format_labs(records):
             continue
 
         # -------------------------------------------------
-        # نتایج
+        # نمایش نتایج
         # -------------------------------------------------
 
         for item in values:
 
-            name = item.get(
-                "name",
+            name = (
+                item.get(
+                    "name"
+                )
+                or
                 "آزمایش"
             )
 
-            value = health_report_format_value(
-                item.get("value")
+            value = (
+                health_report_format_value(
+                    item.get(
+                        "value"
+                    )
+                )
             )
 
             unit = item.get(
@@ -12736,10 +13080,13 @@ def health_report_format_labs(records):
                 value_text = value
 
             lines.append(
-                f"• {name}: {value_text}"
+                f"• {name}: "
+                f"{value_text}"
             )
 
+            # -------------------------------------------------
             # محدوده مرجع
+            # -------------------------------------------------
 
             ref_min = item.get(
                 "reference_min"
@@ -12751,7 +13098,8 @@ def health_report_format_labs(records):
 
             if (
                 ref_min is not None
-                and ref_max is not None
+                and
+                ref_max is not None
             ):
 
                 lines.append(
@@ -12761,11 +13109,51 @@ def health_report_format_labs(records):
                     f"{health_report_format_value(ref_max)}"
                 )
 
-        # -------------------------------------------------
-        # نکات قابل توجه
-        # -------------------------------------------------
+        lines.append("")
 
-        notable_items = []
+    return "\n".join(
+        lines
+    ).rstrip()
+
+
+# =========================================================
+# 14. FORMAT NOTABLE LAB POINTS
+# =========================================================
+#
+# فقط موارد زیر نمایش داده می‌شوند:
+#
+# 1) پایین‌تر از محدوده
+# 2) بالاتر از محدوده
+# 3) نزدیک به حد پایین
+# 4) نزدیک به حد بالا
+#
+# مقادیر عادی و وسط محدوده نمایش داده نمی‌شوند.
+#
+# =========================================================
+
+def health_report_format_lab_notable_points(
+    records
+):
+
+    if not records:
+
+        return None
+
+    notable_items = []
+
+    for record in records:
+
+        record_date = (
+            record.get(
+                "record_date"
+            )
+        )
+
+        values = (
+            health_report_extract_lab_values(
+                record
+            )
+        )
 
         for item in values:
 
@@ -12773,66 +13161,144 @@ def health_report_format_labs(records):
                 "status"
             )
 
-            if status in [
+            if status not in [
+
                 "below",
+
                 "above",
+
                 "near_lower",
+
                 "near_upper"
             ]:
 
-                notable_items.append(
-                    item
+                continue
+
+            notable_items.append({
+
+                "name":
+                    item.get(
+                        "name"
+                    ),
+
+                "value":
+                    item.get(
+                        "value"
+                    ),
+
+                "unit":
+                    item.get(
+                        "unit"
+                    ),
+
+                "status":
+                    status,
+
+                "status_label":
+                    item.get(
+                        "status_label"
+                    ),
+
+                "date":
+                    record_date
+            })
+
+    # -----------------------------------------------------
+    # اگر هیچ مورد قابل توجهی وجود نداشت
+    # -----------------------------------------------------
+
+    if not notable_items:
+
+        return (
+            "⚠️ نکات قابل توجه آزمایش\n\n"
+            "موردی خارج از محدوده مرجع "
+            "یا نزدیک به حدود مرجع ثبت نشده است."
+        )
+
+    lines = []
+
+    lines.append(
+        "⚠️ نکات قابل توجه آزمایش"
+    )
+
+    lines.append(
+        "مقادیر خارج از محدوده مرجع یا "
+        "واقع‌شده در ۱۰٪ ابتدایی یا انتهایی "
+        "محدوده مرجع در این بخش نمایش داده می‌شوند."
+    )
+
+    lines.append("")
+
+    for item in notable_items:
+
+        name = (
+            item.get(
+                "name"
+            )
+            or
+            "آزمایش"
+        )
+
+        value = (
+            health_report_format_value(
+                item.get(
+                    "value"
                 )
+            )
+        )
 
-        if notable_items:
+        unit = item.get(
+            "unit"
+        )
 
-            lines.append("")
+        if unit:
 
-            lines.append(
-                "⚠️ نکات قابل توجه آزمایش"
+            value_text = (
+                f"{value} {unit}"
             )
 
-            for item in notable_items:
+        else:
 
-                name = item.get(
-                    "name",
-                    "آزمایش"
+            value_text = value
+
+        status_label = (
+            item.get(
+                "status_label"
+            )
+            or
+            "نیازمند بررسی"
+        )
+
+        date_text = ""
+
+        if item.get(
+            "date"
+        ):
+
+            date_text = (
+                " — "
+                +
+                health_report_format_date(
+                    item[
+                        "date"
+                    ]
                 )
+            )
 
-                value = health_report_format_value(
-                    item.get("value")
-                )
+        lines.append(
+            f"• {name}: "
+            f"{value_text} — "
+            f"{status_label}"
+            f"{date_text}"
+        )
 
-                unit = item.get(
-                    "unit"
-                )
-
-                if unit:
-
-                    value_text = (
-                        f"{value} {unit}"
-                    )
-
-                else:
-
-                    value_text = value
-
-                label = item.get(
-                    "status_label"
-                )
-
-                lines.append(
-                    f"• {name}: "
-                    f"{value_text} — {label}"
-                )
-
-        lines.append("")
-
-    return "\n".join(lines).rstrip()
+    return "\n".join(
+        lines
+    )
 
 
 # =========================================================
-# 14. FORMAT REPEATED LAB TRENDS
+# 15. FORMAT REPEATED LAB TRENDS
 # =========================================================
 
 def health_report_format_lab_trends(
@@ -12857,21 +13323,38 @@ def health_report_format_lab_trends(
 
     lines.append("")
 
-    for _, item in trends.items():
+    for _, item in (
+        trends.items()
+    ):
 
-        name = item["name"]
+        name = item[
+            "name"
+        ]
 
         lines.append(
             f"• {name}"
         )
 
+        # -------------------------------------------------
         # مرتب‌سازی از قدیمی به جدید
+        # -------------------------------------------------
 
         values = sorted(
-            item["values"],
+
+            item[
+                "values"
+            ],
+
             key=lambda x: (
-                str(x.get("date"))
-                if x.get("date") is not None
+
+                str(
+                    x.get(
+                        "date"
+                    )
+                )
+                if x.get(
+                    "date"
+                ) is not None
                 else ""
             )
         )
@@ -12880,24 +13363,31 @@ def health_report_format_lab_trends(
 
             date_text = (
                 health_report_format_date(
-                    value_item.get("date")
+                    value_item.get(
+                        "date"
+                    )
                 )
             )
 
             value_text = (
                 health_report_format_value(
-                    value_item.get("value")
+                    value_item.get(
+                        "value"
+                    )
                 )
             )
 
-            unit = value_item.get(
-                "unit"
+            unit = (
+                value_item.get(
+                    "unit"
+                )
             )
 
             if unit:
 
                 value_text = (
-                    f"{value_text} {unit}"
+                    f"{value_text} "
+                    f"{unit}"
                 )
 
             lines.append(
@@ -12907,16 +13397,38 @@ def health_report_format_lab_trends(
 
         lines.append("")
 
-    return "\n".join(lines).rstrip()
+    return "\n".join(
+        lines
+    ).rstrip()
 
 
 # =========================================================
-# 15. BUILD COMPLETE HEALTH REPORT
+# 16. BUILD COMPLETE HEALTH REPORT
+# =========================================================
+#
+# ترتیب نهایی گزارش:
+#
+# 📋 گزارش سلامت من
+#
+# 👤 اطلاعات پایه
+#
+# 🧪 نتایج آزمایش‌ها
+#
+# 💊 وضعیت داروها
+#
+# ⚠️ نکات قابل توجه آزمایش
+#
+# 📈 روند آزمایش‌های تکرارشده
+#
 # =========================================================
 
 def health_report_build(
     user_id
 ):
+
+    # -----------------------------------------------------
+    # دریافت اطلاعات پروفایل
+    # -----------------------------------------------------
 
     profile = (
         health_report_get_profile(
@@ -12924,17 +13436,29 @@ def health_report_build(
         )
     )
 
-    medications = (
-        health_report_get_active_medications(
-            user_id
-        )
-    )
+    # -----------------------------------------------------
+    # دریافت اطلاعات آزمایش‌ها
+    # -----------------------------------------------------
 
     lab_records = (
         health_report_get_lab_records(
             user_id
         )
     )
+
+    # -----------------------------------------------------
+    # بخش داروها
+    # -----------------------------------------------------
+
+    medication_text = (
+        health_report_build_medications(
+            user_id
+        )
+    )
+
+    # -----------------------------------------------------
+    # ساخت بخش‌ها
+    # -----------------------------------------------------
 
     sections = []
 
@@ -12947,11 +13471,12 @@ def health_report_build(
     )
 
     sections.append(
-        "اطلاعات ثبت‌شده سلامت شما در یک نگاه:"
+        "اطلاعات ثبت‌شده سلامت شما "
+        "در یک نگاه:"
     )
 
     # -----------------------------------------------------
-    # پروفایل
+    # 1. اطلاعات پایه
     # -----------------------------------------------------
 
     sections.append(
@@ -12961,17 +13486,7 @@ def health_report_build(
     )
 
     # -----------------------------------------------------
-    # داروها
-    # -----------------------------------------------------
-
-    sections.append(
-        health_report_build_medications(
-            user_id
-        )
-    )
-
-    # -----------------------------------------------------
-    # آزمایش‌ها
+    # 2. نتایج آزمایش‌ها
     # -----------------------------------------------------
 
     sections.append(
@@ -12981,7 +13496,31 @@ def health_report_build(
     )
 
     # -----------------------------------------------------
-    # روند آزمایش‌های تکرارشده
+    # 3. وضعیت داروها
+    # -----------------------------------------------------
+
+    sections.append(
+        medication_text
+    )
+
+    # -----------------------------------------------------
+    # 4. نکات قابل توجه آزمایش
+    # -----------------------------------------------------
+
+    notable_text = (
+        health_report_format_lab_notable_points(
+            lab_records
+        )
+    )
+
+    if notable_text:
+
+        sections.append(
+            notable_text
+        )
+
+    # -----------------------------------------------------
+    # 5. روند آزمایش‌های تکرارشده
     # -----------------------------------------------------
 
     trend_text = (
@@ -12996,13 +13535,17 @@ def health_report_build(
             trend_text
         )
 
+    # -----------------------------------------------------
+    # خروجی نهایی
+    # -----------------------------------------------------
+
     return "\n\n".join(
         sections
     )
 
 
 # =========================================================
-# 16. SEND HEALTH REPORT
+# 17. SEND HEALTH REPORT
 # =========================================================
 
 def send_health_report(
@@ -13034,7 +13577,8 @@ def send_health_report(
 
         send_message(
             chat_id,
-            "❌ هنگام تهیه گزارش سلامت مشکلی پیش آمد.\n\n"
+            "❌ هنگام تهیه گزارش سلامت "
+            "مشکلی پیش آمد.\n\n"
             "لطفاً چند لحظه بعد دوباره تلاش کنید.",
             MAIN_MENU_BUTTONS
         )
@@ -13048,6 +13592,7 @@ print(
     "========== MAHROO HEALTH REPORT MODULE LOADED ==========",
     flush=True
 )
+
 # =========================================================
 # RUN
 # =========================================================
@@ -13070,4 +13615,5 @@ if __name__ == "__main__":
         port=port
 
     )
+
 
