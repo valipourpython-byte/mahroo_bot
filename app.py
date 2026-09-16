@@ -4929,6 +4929,13 @@ def create_due_occurrences():
     )
 
     today = now.date()
+        print(
+        "REMINDER DEBUG - now:",
+        now,
+        "today:",
+        today,
+        flush=True
+    )
 
     created = 0
 
@@ -4998,7 +5005,19 @@ def create_due_occurrences():
                         scheduled_time
                     )
                 )
-
+                print(
+                    "REMINDER DEBUG - schedule:",
+                    scheduled_time,
+                    "scheduled_dt:",
+                    scheduled_dt,
+                    "now:",
+                    now,
+                    "earliest:",
+                    earliest,
+                    "VALID:",
+                    earliest <= scheduled_dt <= now,
+                    flush=True
+                )
                 # -------------------------------------------------
                 # ONLY REMINDERS WITHIN LAST 10 MINUTES
                 # -------------------------------------------------
