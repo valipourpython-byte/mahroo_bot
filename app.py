@@ -267,6 +267,7 @@ def init_database():
 MAIN_MENU_BUTTONS = [
     ["👤 پروفایل سلامت من"],
     ["📊 داشبورد من"],
+    ["📋 گزارش سلامت من"],
     ["➕  افزودن دارو بصورت دستی"],
     ["📷 افزودن دارو از روی نسخه"],
     ["🧪 افزودن آزمایش"],
@@ -7010,6 +7011,17 @@ def receive_message():
         if text == "👤 پروفایل سلامت من":
             show_patient_profile(chat_id, user_id)
             return "", 200
+
+        if text == "📋 گزارش سلامت من":
+
+            send_health_report(
+                user_id,
+                chat_id
+            )
+        
+            return jsonify({
+                "status": "ok"
+            })
         if text == "📊 داشبورد من":
 
             medications = (
@@ -11707,6 +11719,1335 @@ print(
     flush=True
 )
 
+
+# =========================================================
+# MAHROO HEALTH REPORT MODULE
+# =========================================================
+#
+# گزارش سلامت یکپارچه کاربر
+#
+# شامل:
+# 1) اطلاعات پایه پروفایل
+# 2) داروهای فعال
+# 3) میزان پایبندی به هر دارو
+# 4) آخرین نتایج آزمایش
+# 5) محدوده مرجع آزمایش
+# 6) نکات قابل توجه آزمایش
+# 7) روند آزمایش‌های تکرارشده
+#
+# نکته:
+# این ماژول فقط اطلاعات موجود در دیتابیس را می‌خواند
+# و هیچ تغییری در اطلاعات دارو، پروفایل یا آزمایش ایجاد نمی‌کند.
+#
+# =========================================================
+
+
+HEALTH_REPORT_BUTTON = "📋 گزارش سلامت من"
+
+
+# =========================================================
+# 1. FORMAT HELPERS
+# =========================================================
+
+def health_report_format_value(value):
+
+    if value is None:
+        return "ثبت نشده"
+
+    if isinstance(value, float):
+
+        if value.is_integer():
+            return str(int(value))
+
+        return f"{value:.2f}".rstrip("0").rstrip(".")
+
+    return str(value)
+
+
+def health_report_format_date(value):
+
+    if value is None:
+        return "ثبت نشده"
+
+    try:
+
+        if hasattr(value, "strftime"):
+            return value.strftime("%Y/%m/%d")
+
+        text = str(value)
+
+        if "T" in text:
+            text = text.split("T")[0]
+
+        if "-" in text:
+
+            parts = text.split("-")
+
+            if len(parts) == 3:
+                return f"{parts[0]}/{parts[1]}/{parts[2]}"
+
+        return text
+
+    except Exception:
+
+        return str(value)
+
+
+# =========================================================
+# 2. PROFILE
+# =========================================================
+
+def health_report_get_profile(user_id):
+
+    with get_db_connection() as conn:
+
+        with conn.cursor() as cur:
+
+            cur.execute("""
+                SELECT
+                    full_name,
+                    birth_date,
+                    gender,
+                    allergies,
+                    medical_history,
+                    important_notes
+                FROM mahroo_patient_profiles
+                WHERE user_id = %s
+                LIMIT 1
+            """, (user_id,))
+
+            row = cur.fetchone()
+
+    if not row:
+        return None
+
+    return {
+        "full_name": row[0],
+        "birth_date": row[1],
+        "gender": row[2],
+        "allergies": row[3],
+        "medical_history": row[4],
+        "important_notes": row[5]
+    }
+
+
+# =========================================================
+# 3. ACTIVE MEDICATIONS
+# =========================================================
+
+def health_report_get_active_medications(user_id):
+
+    with get_db_connection() as conn:
+
+        with conn.cursor() as cur:
+
+            cur.execute("""
+                SELECT
+                    id,
+                    name,
+                    doses_per_day,
+                    number_of_doses,
+                    start_date,
+                    end_date
+                FROM mahroo_medications
+                WHERE user_id = %s
+                  AND active = TRUE
+                ORDER BY id
+            """, (user_id,))
+
+            rows = cur.fetchall()
+
+    medications = []
+
+    for row in rows:
+
+        medications.append({
+            "id": row[0],
+            "name": row[1],
+            "doses_per_day": row[2],
+            "number_of_doses": row[3],
+            "start_date": row[4],
+            "end_date": row[5]
+        })
+
+    return medications
+
+
+# =========================================================
+# 4. MEDICATION SCHEDULES
+# =========================================================
+
+def health_report_get_medication_schedules(medication_id):
+
+    with get_db_connection() as conn:
+
+        with conn.cursor() as cur:
+
+            cur.execute("""
+                SELECT
+                    scheduled_time
+                FROM mahroo_medication_schedules
+                WHERE medication_id = %s
+                  AND active = TRUE
+                ORDER BY scheduled_time
+            """, (medication_id,))
+
+            rows = cur.fetchall()
+
+    return [
+        row[0]
+        for row in rows
+    ]
+
+
+# =========================================================
+# 5. MEDICATION ADHERENCE
+# =========================================================
+#
+# فقط این دو وضعیت در محاسبه پایبندی وارد می‌شوند:
+#
+# taken
+# not_taken
+#
+# وضعیت‌هایی مثل:
+# pending
+# sent
+# snoozed
+#
+# وارد مخرج محاسبه نمی‌شوند.
+#
+# بنابراین اگر کاربر Reminder را نادیده بگیرد،
+# آن Reminder به‌عنوان not_taken محسوب نمی‌شود.
+#
+# =========================================================
+
+def health_report_get_medication_adherence(
+    user_id,
+    medication_id
+):
+
+    with get_db_connection() as conn:
+
+        with conn.cursor() as cur:
+
+            cur.execute("""
+                SELECT
+                    status,
+                    COUNT(*)
+                FROM mahroo_reminder_occurrences
+                WHERE user_id = %s
+                  AND medication_id = %s
+                  AND status IN (
+                      'taken',
+                      'not_taken'
+                  )
+                GROUP BY status
+            """, (
+                user_id,
+                medication_id
+            ))
+
+            rows = cur.fetchall()
+
+    taken = 0
+    not_taken = 0
+
+    for row in rows:
+
+        status = row[0]
+        count = row[1]
+
+        if status == "taken":
+
+            taken = count
+
+        elif status == "not_taken":
+
+            not_taken = count
+
+    completed_total = taken + not_taken
+
+    if completed_total > 0:
+
+        adherence = (
+            taken /
+            completed_total
+        ) * 100
+
+    else:
+
+        adherence = None
+
+    return {
+        "taken": taken,
+        "not_taken": not_taken,
+        "completed_total": completed_total,
+        "adherence": adherence
+    }
+
+
+# =========================================================
+# 6. BUILD MEDICATION REPORT
+# =========================================================
+
+def health_report_build_medications(
+    user_id
+):
+
+    medications = health_report_get_active_medications(
+        user_id
+    )
+
+    if not medications:
+
+        return (
+            "💊 وضعیت داروها\n\n"
+            "در حال حاضر داروی فعالی ثبت نشده است."
+        )
+
+    lines = []
+
+    lines.append("💊 وضعیت داروها")
+    lines.append("")
+
+    for medication in medications:
+
+        medication_id = medication["id"]
+        medication_name = medication["name"]
+
+        adherence = (
+            health_report_get_medication_adherence(
+                user_id,
+                medication_id
+            )
+        )
+
+        schedules = (
+            health_report_get_medication_schedules(
+                medication_id
+            )
+        )
+
+        lines.append(
+            f"💊 {medication_name}"
+        )
+
+        if schedules:
+
+            lines.append(
+                f"تعداد نوبت‌های برنامه‌ریزی‌شده: "
+                f"{len(schedules)} نوبت در روز"
+            )
+
+        elif medication.get("doses_per_day"):
+
+            lines.append(
+                f"تعداد نوبت‌های برنامه‌ریزی‌شده: "
+                f"{medication['doses_per_day']} نوبت در روز"
+            )
+
+        else:
+
+            lines.append(
+                "تعداد نوبت‌های برنامه‌ریزی‌شده: ثبت نشده"
+            )
+
+        lines.append(
+            f"مصرف‌شده: {adherence['taken']}"
+        )
+
+        lines.append(
+            f"مصرف‌نشده: {adherence['not_taken']}"
+        )
+
+        if adherence["adherence"] is not None:
+
+            lines.append(
+                "پایبندی: "
+                f"{adherence['adherence']:.1f}%"
+            )
+
+        else:
+
+            lines.append(
+                "پایبندی: "
+                "هنوز اطلاعات کافی ثبت نشده است."
+            )
+
+        if medication.get("start_date"):
+
+            lines.append(
+                "شروع مصرف: "
+                + health_report_format_date(
+                    medication["start_date"]
+                )
+            )
+
+        if medication.get("end_date"):
+
+            lines.append(
+                "پایان مصرف: "
+                + health_report_format_date(
+                    medication["end_date"]
+                )
+            )
+
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
+
+# =========================================================
+# 7. LAB STATUS
+# =========================================================
+
+def health_report_get_lab_status(
+    value,
+    reference_min=None,
+    reference_max=None
+):
+
+    if value is None:
+        return None
+
+    try:
+
+        numeric_value = float(value)
+
+    except Exception:
+
+        return None
+
+    try:
+
+        lower = (
+            float(reference_min)
+            if reference_min is not None
+            else None
+        )
+
+    except Exception:
+
+        lower = None
+
+    try:
+
+        upper = (
+            float(reference_max)
+            if reference_max is not None
+            else None
+        )
+
+    except Exception:
+
+        upper = None
+
+    # -----------------------------------------------------
+    # خارج از محدوده
+    # -----------------------------------------------------
+
+    if lower is not None:
+
+        if numeric_value < lower:
+
+            return {
+                "status": "below",
+                "label": "پایین‌تر از محدوده"
+            }
+
+    if upper is not None:
+
+        if numeric_value > upper:
+
+            return {
+                "status": "above",
+                "label": "بالاتر از محدوده"
+            }
+
+    # -----------------------------------------------------
+    # نزدیک به حد پایین
+    # -----------------------------------------------------
+
+    if (
+        lower is not None
+        and upper is not None
+        and upper > lower
+    ):
+
+        interval_width = upper - lower
+
+        lower_boundary = (
+            lower +
+            (0.10 * interval_width)
+        )
+
+        upper_boundary = (
+            upper -
+            (0.10 * interval_width)
+        )
+
+        if numeric_value <= lower_boundary:
+
+            return {
+                "status": "near_lower",
+                "label": "نزدیک به حد پایین محدوده"
+            }
+
+        if numeric_value >= upper_boundary:
+
+            return {
+                "status": "near_upper",
+                "label": "نزدیک به حد بالای محدوده"
+            }
+
+    return {
+        "status": "normal",
+        "label": None
+    }
+
+
+# =========================================================
+# 8. EXTRACT NUMERIC LAB VALUES
+# =========================================================
+#
+# این تابع با چند نام احتمالی برای فیلدهای JSON کار می‌کند
+# تا اگر ساختار JSON کمی متفاوت بود، باز هم بتواند اطلاعات
+# را استخراج کند.
+#
+# =========================================================
+
+def health_report_extract_lab_values(record):
+
+    structured_data = record.get(
+        "structured_data"
+    )
+
+    if not structured_data:
+
+        return []
+
+    # -----------------------------------------------------
+    # اگر structured_data مستقیماً لیست باشد
+    # -----------------------------------------------------
+
+    if isinstance(
+        structured_data,
+        list
+    ):
+
+        raw_values = structured_data
+
+    elif isinstance(
+        structured_data,
+        dict
+    ):
+
+        raw_values = None
+
+        possible_keys = [
+            "results",
+            "lab_results",
+            "tests",
+            "values",
+            "parameters",
+            "results_list"
+        ]
+
+        for key in possible_keys:
+
+            candidate = structured_data.get(key)
+
+            if isinstance(candidate, list):
+
+                raw_values = candidate
+                break
+
+        if raw_values is None:
+
+            # بعضی مدل‌ها ممکن است داده را داخل
+            # یک کلید واحد ذخیره کنند.
+
+            raw_values = []
+
+            for key, value in structured_data.items():
+
+                if isinstance(value, dict):
+
+                    item = value.copy()
+
+                    if (
+                        "name" not in item
+                        and "test_name" not in item
+                    ):
+
+                        item["name"] = key
+
+                    raw_values.append(item)
+
+    else:
+
+        return []
+
+    results = []
+
+    for item in raw_values:
+
+        if not isinstance(item, dict):
+
+            continue
+
+        # -------------------------------------------------
+        # نام آزمایش
+        # -------------------------------------------------
+
+        name = None
+
+        for key in [
+            "name",
+            "test_name",
+            "parameter",
+            "marker",
+            "analyte"
+        ]:
+
+            if item.get(key) is not None:
+
+                name = item.get(key)
+                break
+
+        # -------------------------------------------------
+        # مقدار
+        # -------------------------------------------------
+
+        value = None
+
+        for key in [
+            "value",
+            "result",
+            "numeric_value",
+            "measured_value"
+        ]:
+
+            if item.get(key) is not None:
+
+                value = item.get(key)
+                break
+
+        if name is None or value is None:
+
+            continue
+
+        # -------------------------------------------------
+        # واحد
+        # -------------------------------------------------
+
+        unit = None
+
+        for key in [
+            "unit",
+            "units"
+        ]:
+
+            if item.get(key) is not None:
+
+                unit = item.get(key)
+                break
+
+        # -------------------------------------------------
+        # حد پایین
+        # -------------------------------------------------
+
+        reference_min = None
+
+        for key in [
+            "reference_min",
+            "ref_min",
+            "normal_min",
+            "range_min",
+            "min_reference",
+            "lower_bound",
+            "low"
+        ]:
+
+            if item.get(key) is not None:
+
+                reference_min = item.get(key)
+                break
+
+        # -------------------------------------------------
+        # حد بالا
+        # -------------------------------------------------
+
+        reference_max = None
+
+        for key in [
+            "reference_max",
+            "ref_max",
+            "normal_max",
+            "range_max",
+            "max_reference",
+            "upper_bound",
+            "high"
+        ]:
+
+            if item.get(key) is not None:
+
+                reference_max = item.get(key)
+                break
+
+        # -------------------------------------------------
+        # وضعیت
+        # -----------------------------------------------------
+
+        status = health_report_get_lab_status(
+            value=value,
+            reference_min=reference_min,
+            reference_max=reference_max
+        )
+
+        results.append({
+
+            "name": str(name),
+
+            "value": value,
+
+            "unit": unit,
+
+            "reference_min": reference_min,
+
+            "reference_max": reference_max,
+
+            "status": (
+                status["status"]
+                if status
+                else None
+            ),
+
+            "status_label": (
+                status["label"]
+                if status
+                else None
+            )
+        })
+
+    return results
+
+
+# =========================================================
+# 9. GET LAB RECORDS
+# =========================================================
+
+def health_report_get_lab_records(user_id):
+
+    with get_db_connection() as conn:
+
+        with conn.cursor() as cur:
+
+            cur.execute("""
+                SELECT
+                    id,
+                    record_type,
+                    record_date,
+                    title,
+                    extracted_text,
+                    structured_data,
+                    user_confirmed,
+                    notes
+                FROM mahroo_health_records
+                WHERE user_id = %s
+                  AND record_type = 'lab'
+                ORDER BY
+                    record_date DESC NULLS LAST,
+                    created_at DESC
+            """, (user_id,))
+
+            rows = cur.fetchall()
+
+    records = []
+
+    for row in rows:
+
+        records.append({
+
+            "id": row[0],
+
+            "record_type": row[1],
+
+            "record_date": row[2],
+
+            "title": row[3],
+
+            "extracted_text": row[4],
+
+            "structured_data": row[5],
+
+            "user_confirmed": row[6],
+
+            "notes": row[7]
+        })
+
+    return records
+
+
+# =========================================================
+# 10. NORMALIZE LAB NAME
+# =========================================================
+
+def health_report_normalize_lab_name(name):
+
+    if name is None:
+
+        return ""
+
+    text = str(name).strip().lower()
+
+    # حذف فاصله‌های اضافی
+
+    text = " ".join(
+        text.split()
+    )
+
+    return text
+
+
+# =========================================================
+# 11. BUILD LAB TRENDS
+# =========================================================
+#
+# اگر یک پارامتر در چند آزمایش تکرار شده باشد،
+# مقادیر آن برای نمایش روند جمع‌آوری می‌شوند.
+#
+# =========================================================
+
+def health_report_build_lab_trends(records):
+
+    trends = {}
+
+    for record in records:
+
+        record_date = record.get(
+            "record_date"
+        )
+
+        values = (
+            health_report_extract_lab_values(
+                record
+            )
+        )
+
+        for item in values:
+
+            name = item.get("name")
+
+            if not name:
+
+                continue
+
+            normalized_name = (
+                health_report_normalize_lab_name(
+                    name
+                )
+            )
+
+            if not normalized_name:
+
+                continue
+
+            if normalized_name not in trends:
+
+                trends[normalized_name] = {
+                    "name": name,
+                    "values": []
+                }
+
+            trends[normalized_name]["values"].append({
+
+                "date": record_date,
+
+                "value": item.get("value"),
+
+                "unit": item.get("unit")
+            })
+
+    # فقط پارامترهایی که حداقل دو بار
+    # در آزمایش‌های مختلف دیده شده‌اند.
+
+    repeated = {}
+
+    for key, item in trends.items():
+
+        if len(item["values"]) >= 2:
+
+            repeated[key] = item
+
+    return repeated
+
+
+# =========================================================
+# 12. FORMAT PROFILE
+# =========================================================
+
+def health_report_format_profile(profile):
+
+    lines = []
+
+    lines.append("👤 اطلاعات پایه")
+    lines.append("")
+
+    if not profile:
+
+        lines.append(
+            "اطلاعات پروفایل سلامت هنوز ثبت نشده است."
+        )
+
+        return "\n".join(lines)
+
+    if profile.get("full_name"):
+
+        lines.append(
+            f"نام: {profile['full_name']}"
+        )
+
+    if profile.get("birth_date"):
+
+        lines.append(
+            "تاریخ تولد: "
+            + health_report_format_date(
+                profile["birth_date"]
+            )
+        )
+
+    if profile.get("gender"):
+
+        lines.append(
+            f"جنسیت: {profile['gender']}"
+        )
+
+    if profile.get("allergies"):
+
+        lines.append(
+            f"حساسیت‌ها: {profile['allergies']}"
+        )
+
+    if profile.get("medical_history"):
+
+        lines.append(
+            "سابقه پزشکی: "
+            f"{profile['medical_history']}"
+        )
+
+    if profile.get("important_notes"):
+
+        lines.append(
+            "نکات مهم: "
+            f"{profile['important_notes']}"
+        )
+
+    return "\n".join(lines)
+
+
+# =========================================================
+# 13. FORMAT LAB RESULTS
+# =========================================================
+
+def health_report_format_labs(records):
+
+    if not records:
+
+        return (
+            "🧪 نتایج آزمایش‌ها\n\n"
+            "هنوز آزمایشی ثبت نشده است."
+        )
+
+    lines = []
+
+    lines.append(
+        "🧪 نتایج آزمایش‌ها"
+    )
+
+    lines.append("")
+
+    for record in records:
+
+        title = record.get(
+            "title"
+        ) or "آزمایش"
+
+        record_date = (
+            health_report_format_date(
+                record.get("record_date")
+            )
+        )
+
+        lines.append(
+            f"🧪 {title}"
+        )
+
+        if record.get("record_date"):
+
+            lines.append(
+                f"تاریخ: {record_date}"
+            )
+
+        values = (
+            health_report_extract_lab_values(
+                record
+            )
+        )
+
+        if not values:
+
+            lines.append(
+                "اطلاعات عددی قابل نمایش "
+                "برای این آزمایش ثبت نشده است."
+            )
+
+            lines.append("")
+
+            continue
+
+        # -------------------------------------------------
+        # نتایج
+        # -------------------------------------------------
+
+        for item in values:
+
+            name = item.get(
+                "name",
+                "آزمایش"
+            )
+
+            value = health_report_format_value(
+                item.get("value")
+            )
+
+            unit = item.get(
+                "unit"
+            )
+
+            if unit:
+
+                value_text = (
+                    f"{value} {unit}"
+                )
+
+            else:
+
+                value_text = value
+
+            lines.append(
+                f"• {name}: {value_text}"
+            )
+
+            # محدوده مرجع
+
+            ref_min = item.get(
+                "reference_min"
+            )
+
+            ref_max = item.get(
+                "reference_max"
+            )
+
+            if (
+                ref_min is not None
+                and ref_max is not None
+            ):
+
+                lines.append(
+                    "  محدوده مرجع: "
+                    f"{health_report_format_value(ref_min)}"
+                    " تا "
+                    f"{health_report_format_value(ref_max)}"
+                )
+
+        # -------------------------------------------------
+        # نکات قابل توجه
+        # -------------------------------------------------
+
+        notable_items = []
+
+        for item in values:
+
+            status = item.get(
+                "status"
+            )
+
+            if status in [
+                "below",
+                "above",
+                "near_lower",
+                "near_upper"
+            ]:
+
+                notable_items.append(
+                    item
+                )
+
+        if notable_items:
+
+            lines.append("")
+
+            lines.append(
+                "⚠️ نکات قابل توجه آزمایش"
+            )
+
+            for item in notable_items:
+
+                name = item.get(
+                    "name",
+                    "آزمایش"
+                )
+
+                value = health_report_format_value(
+                    item.get("value")
+                )
+
+                unit = item.get(
+                    "unit"
+                )
+
+                if unit:
+
+                    value_text = (
+                        f"{value} {unit}"
+                    )
+
+                else:
+
+                    value_text = value
+
+                label = item.get(
+                    "status_label"
+                )
+
+                lines.append(
+                    f"• {name}: "
+                    f"{value_text} — {label}"
+                )
+
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
+
+# =========================================================
+# 14. FORMAT REPEATED LAB TRENDS
+# =========================================================
+
+def health_report_format_lab_trends(
+    records
+):
+
+    trends = (
+        health_report_build_lab_trends(
+            records
+        )
+    )
+
+    if not trends:
+
+        return None
+
+    lines = []
+
+    lines.append(
+        "📈 روند آزمایش‌های تکرارشده"
+    )
+
+    lines.append("")
+
+    for _, item in trends.items():
+
+        name = item["name"]
+
+        lines.append(
+            f"• {name}"
+        )
+
+        # مرتب‌سازی از قدیمی به جدید
+
+        values = sorted(
+            item["values"],
+            key=lambda x: (
+                str(x.get("date"))
+                if x.get("date") is not None
+                else ""
+            )
+        )
+
+        for value_item in values:
+
+            date_text = (
+                health_report_format_date(
+                    value_item.get("date")
+                )
+            )
+
+            value_text = (
+                health_report_format_value(
+                    value_item.get("value")
+                )
+            )
+
+            unit = value_item.get(
+                "unit"
+            )
+
+            if unit:
+
+                value_text = (
+                    f"{value_text} {unit}"
+                )
+
+            lines.append(
+                f"  {date_text}: "
+                f"{value_text}"
+            )
+
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
+
+# =========================================================
+# 15. BUILD COMPLETE HEALTH REPORT
+# =========================================================
+
+def health_report_build(
+    user_id
+):
+
+    profile = (
+        health_report_get_profile(
+            user_id
+        )
+    )
+
+    medications = (
+        health_report_get_active_medications(
+            user_id
+        )
+    )
+
+    lab_records = (
+        health_report_get_lab_records(
+            user_id
+        )
+    )
+
+    sections = []
+
+    # -----------------------------------------------------
+    # عنوان
+    # -----------------------------------------------------
+
+    sections.append(
+        "📋 گزارش سلامت من"
+    )
+
+    sections.append(
+        "اطلاعات ثبت‌شده سلامت شما در یک نگاه:"
+    )
+
+    # -----------------------------------------------------
+    # پروفایل
+    # -----------------------------------------------------
+
+    sections.append(
+        health_report_format_profile(
+            profile
+        )
+    )
+
+    # -----------------------------------------------------
+    # داروها
+    # -----------------------------------------------------
+
+    sections.append(
+        health_report_build_medications(
+            user_id
+        )
+    )
+
+    # -----------------------------------------------------
+    # آزمایش‌ها
+    # -----------------------------------------------------
+
+    sections.append(
+        health_report_format_labs(
+            lab_records
+        )
+    )
+
+    # -----------------------------------------------------
+    # روند آزمایش‌های تکرارشده
+    # -----------------------------------------------------
+
+    trend_text = (
+        health_report_format_lab_trends(
+            lab_records
+        )
+    )
+
+    if trend_text:
+
+        sections.append(
+            trend_text
+        )
+
+    return "\n\n".join(
+        sections
+    )
+
+
+# =========================================================
+# 16. SEND HEALTH REPORT
+# =========================================================
+
+def send_health_report(
+    user_id,
+    chat_id
+):
+
+    try:
+
+        report = (
+            health_report_build(
+                user_id
+            )
+        )
+
+        send_message(
+            chat_id,
+            report,
+            MAIN_MENU_BUTTONS
+        )
+
+    except Exception as e:
+
+        print(
+            "Health report error:",
+            repr(e),
+            flush=True
+        )
+
+        send_message(
+            chat_id,
+            "❌ هنگام تهیه گزارش سلامت مشکلی پیش آمد.\n\n"
+            "لطفاً چند لحظه بعد دوباره تلاش کنید.",
+            MAIN_MENU_BUTTONS
+        )
+
+
+# =========================================================
+# MODULE LOAD CHECK
+# =========================================================
+
+print(
+    "========== MAHROO HEALTH REPORT MODULE LOADED ==========",
+    flush=True
+)
 # =========================================================
 # RUN
 # =========================================================
