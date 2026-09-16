@@ -269,6 +269,7 @@ MAIN_MENU_BUTTONS = [
     ["📊 داشبورد من"],
     ["➕  افزودن دارو بصورت دستی"],
     ["📷 افزودن دارو از روی نسخه"],
+    ["🧪 افزودن آزمایش"]
     ["💊 داروهای من"],
     ["🔎 جستجوی دارو"],
     ["💬 سؤال دارویی"],
@@ -10026,3 +10027,1573 @@ if __name__ == "__main__":
         port=port
 
     )
+
+
+# =========================================================
+# =========================================================
+#                     MAHROO LAB MODULE
+# =========================================================
+# =========================================================
+#
+# این بخش کاملاً مستقل از Prescription Module است.
+#
+# امکانات:
+# - دریافت چند تصویر آزمایش
+# - ذخیره موقت تصاویر
+# - ارسال همه تصاویر به Vision
+# - استخراج نتایج آزمایش
+# - نمایش نتایج به کاربر
+# - تأیید یا رد نتایج
+# - ذخیره در mahroo_health_records
+# - اضافه کردن خلاصه به پروفایل سلامت
+# - حذف تصاویر موقت
+#
+# =========================================================
+
+
+# =========================================================
+# LAB CONSTANTS
+# =========================================================
+
+LAB_STATE_IMAGES = "LAB_IMAGES"
+
+LAB_STATE_CONFIRM = "LAB_CONFIRM"
+
+LAB_MAX_IMAGES = 10
+
+
+# =========================================================
+# LAB BUTTONS
+# =========================================================
+
+def lab_upload_buttons():
+
+    return [
+        ["✅ اتمام ارسال تصاویر"],
+        ["❌ لغو آزمایش"]
+    ]
+
+
+def lab_confirm_buttons():
+
+    return [
+        ["✅ بله، اطلاعات درست است"],
+        ["❌ خیر، دوباره عکس می‌فرستم"]
+    ]
+
+
+# =========================================================
+# LAB TEMP DIRECTORY
+# =========================================================
+
+def lab_temp_directory():
+
+    directory = "/tmp/mahroo/laboratory"
+
+    os.makedirs(
+        directory,
+        exist_ok=True
+    )
+
+    return directory
+
+
+# =========================================================
+# LAB CLEANUP
+# =========================================================
+
+def lab_delete_images(
+    image_paths
+):
+
+    if not image_paths:
+        return
+
+    for image_path in image_paths:
+
+        try:
+
+            if (
+                image_path
+                and os.path.exists(image_path)
+            ):
+
+                os.remove(
+                    image_path
+                )
+
+                print(
+                    "LAB: deleted temporary image:",
+                    image_path,
+                    flush=True
+                )
+
+        except Exception as e:
+
+            print(
+                "LAB: could not delete image:",
+                image_path,
+                repr(e),
+                flush=True
+            )
+
+
+def lab_cleanup_session(
+    user_id
+):
+
+    try:
+
+        state, data = get_session(
+            user_id
+        )
+
+        image_paths = data.get(
+            "image_paths",
+            []
+        )
+
+        lab_delete_images(
+            image_paths
+        )
+
+    except Exception as e:
+
+        print(
+            "LAB: session cleanup error:",
+            repr(e),
+            flush=True
+        )
+
+    clear_session(
+        user_id
+    )
+
+
+# =========================================================
+# LAB START
+# =========================================================
+
+def lab_start(
+    user_id,
+    chat_id
+):
+
+    set_session(
+        user_id,
+        LAB_STATE_IMAGES,
+        {
+            "image_paths": []
+        }
+    )
+
+    send_message(
+        chat_id,
+
+        "🧪 <b>افزودن آزمایش</b>\n\n"
+
+        "لطفاً عکس آزمایش خود را ارسال کنید.\n\n"
+
+        "📷 اگر آزمایش چند صفحه دارد، "
+        "می‌توانید چند عکس پشت سر هم ارسال کنید.\n\n"
+
+        "پس از ارسال تمام صفحات، "
+        "گزینه «✅ اتمام ارسال تصاویر» را بزنید.",
+
+        lab_upload_buttons()
+    )
+
+
+# =========================================================
+# LAB DOWNLOAD IMAGE
+# =========================================================
+
+def lab_download_image(
+    file_id,
+    image_number
+):
+
+    if not file_id:
+
+        print(
+            "LAB: file_id is empty.",
+            flush=True
+        )
+
+        return None
+
+    if not BALE_API:
+
+        print(
+            "LAB: BALE_BOT_TOKEN is not configured.",
+            flush=True
+        )
+
+        return None
+
+    try:
+
+        # -------------------------------------------------
+        # Get Bale file information
+        # -------------------------------------------------
+
+        get_file_api = (
+            f"https://tapi.bale.ai/bot{TOKEN}/getFile"
+        )
+
+        response = requests.post(
+            get_file_api,
+            json={
+                "file_id": file_id
+            },
+            timeout=15
+        )
+
+        print(
+            "LAB: getFile status:",
+            response.status_code,
+            flush=True
+        )
+
+        if not response.ok:
+
+            print(
+                "LAB: getFile failed:",
+                response.text[:1000],
+                flush=True
+            )
+
+            return None
+
+        data = response.json()
+
+        if not data.get("ok"):
+
+            print(
+                "LAB: getFile returned ok=false:",
+                data,
+                flush=True
+            )
+
+            return None
+
+        result = data.get(
+            "result"
+        )
+
+        if not result:
+
+            return None
+
+        file_path = result.get(
+            "file_path"
+        )
+
+        if not file_path:
+
+            return None
+
+        # -------------------------------------------------
+        # Download
+        # -------------------------------------------------
+
+        download_url = (
+            f"https://tapi.bale.ai/file/bot{TOKEN}/{file_path}"
+        )
+
+        file_response = requests.get(
+            download_url,
+            timeout=30
+        )
+
+        print(
+            "LAB: download status:",
+            file_response.status_code,
+            flush=True
+        )
+
+        if not file_response.ok:
+
+            print(
+                "LAB: download failed:",
+                file_response.text[:1000],
+                flush=True
+            )
+
+            return None
+
+        # -------------------------------------------------
+        # Temporary path
+        # -------------------------------------------------
+
+        directory = lab_temp_directory()
+
+        filename = (
+            f"lab_{uuid.uuid4().hex}_{image_number}.jpg"
+        )
+
+        image_path = os.path.join(
+            directory,
+            filename
+        )
+
+        with open(
+            image_path,
+            "wb"
+        ) as image_file:
+
+            image_file.write(
+                file_response.content
+            )
+
+        print(
+            "LAB: temporary image saved:",
+            image_path,
+            flush=True
+        )
+
+        return image_path
+
+    except Exception as e:
+
+        print(
+            "LAB: image download exception:",
+            repr(e),
+            flush=True
+        )
+
+        return None
+
+
+# =========================================================
+# LAB ADD IMAGE
+# =========================================================
+
+def lab_add_image(
+    user_id,
+    chat_id,
+    file_id
+):
+
+    state, data = get_session(
+        user_id
+    )
+
+    if state != LAB_STATE_IMAGES:
+
+        return False
+
+    image_paths = data.get(
+        "image_paths",
+        []
+    )
+
+    if len(image_paths) >= LAB_MAX_IMAGES:
+
+        send_message(
+            chat_id,
+            "⚠️ حداکثر ۱۰ تصویر برای هر آزمایش قابل ارسال است.\n\n"
+            "اگر همه تصاویر را فرستاده‌اید، "
+            "گزینه «✅ اتمام ارسال تصاویر» را بزنید.",
+            lab_upload_buttons()
+        )
+
+        return True
+
+    image_number = (
+        len(image_paths) + 1
+    )
+
+    image_path = lab_download_image(
+        file_id,
+        image_number
+    )
+
+    if not image_path:
+
+        send_message(
+            chat_id,
+            "❌ دریافت تصویر آزمایش با مشکل مواجه شد.\n\n"
+            "لطفاً دوباره تصویر را ارسال کنید.",
+            lab_upload_buttons()
+        )
+
+        return True
+
+    image_paths.append(
+        image_path
+    )
+
+    set_session(
+        user_id,
+        LAB_STATE_IMAGES,
+        {
+            "image_paths": image_paths
+        }
+    )
+
+    send_message(
+        chat_id,
+
+        f"✅ تصویر شماره {image_number} دریافت شد.\n\n"
+
+        "اگر صفحه دیگری از آزمایش دارید، "
+        "عکس بعدی را ارسال کنید.\n\n"
+
+        "اگر تمام صفحات را فرستاده‌اید، "
+        "«✅ اتمام ارسال تصاویر» را بزنید.",
+
+        lab_upload_buttons()
+    )
+
+    return True
+
+
+# =========================================================
+# LAB EXTRACTOR
+# =========================================================
+
+def lab_extract_from_images(
+    image_paths
+):
+
+    if not OPENROUTER_API_KEY:
+
+        print(
+            "LAB: OpenRouter API key is missing.",
+            flush=True
+        )
+
+        return None
+
+    if not image_paths:
+
+        return None
+
+    try:
+
+        content = []
+
+        # -------------------------------------------------
+        # Text instruction
+        # -------------------------------------------------
+
+        content.append({
+            "type": "text",
+            "text": """
+این تصاویر مربوط به یک یا چند صفحه از یک برگه آزمایش پزشکی هستند.
+
+همه تصاویر را با هم بررسی کن و نتایج آزمایش را به صورت یک مجموعه واحد استخراج کن.
+
+فقط اطلاعاتی را استخراج کن که واقعاً در تصاویر قابل مشاهده است.
+
+برای هر مورد آزمایش این اطلاعات را استخراج کن:
+
+- نام آزمایش
+- نتیجه یا مقدار
+- واحد
+- محدوده مرجع
+
+قوانین:
+
+1. هیچ نتیجه‌ای را حدس نزن.
+
+2. اگر مقدار عددی است، همان مقدار دقیق قابل مشاهده را ثبت کن.
+
+3. اعشار را حفظ کن.
+
+4. اگر نتیجه Positive، Negative، Reactive،
+   Non-reactive یا مشابه آن است، همان را ثبت کن.
+
+5. اگر محدوده مرجع وجود دارد، آن را ثبت کن.
+
+6. اگر محدوده مرجع وجود ندارد، null قرار بده.
+
+7. اگر یک آزمایش در چند تصویر تکرار شده،
+   فقط یک بار ثبت شود.
+
+8. هیچ تفسیر پزشکی انجام نده.
+
+9. هیچ تشخیص یا توصیه پزشکی ارائه نده.
+
+10. نام آزمایش را تا حد امکان همان‌طور که در برگه نوشته شده حفظ کن.
+
+11. تاریخ آزمایش را اگر قابل مشاهده است استخراج کن.
+
+12. نام آزمایشگاه را اگر قابل مشاهده است استخراج کن.
+
+13. اگر اطلاعاتی ناخوانا است، null قرار بده.
+
+14. خروجی فقط JSON معتبر باشد.
+
+ساختار:
+
+{
+  "test_date": null,
+  "laboratory": null,
+  "results": [
+    {
+      "name": null,
+      "value": null,
+      "unit": null,
+      "reference_range": null
+    }
+  ],
+  "notes": null
+}
+
+اگر هیچ نتیجه‌ای قابل تشخیص نیست:
+
+{
+  "test_date": null,
+  "laboratory": null,
+  "results": [],
+  "notes": "نتایج آزمایش از تصاویر قابل تشخیص نیست."
+}
+"""
+        })
+
+        # -------------------------------------------------
+        # Add all images
+        # -------------------------------------------------
+
+        valid_images = 0
+
+        for image_path in image_paths:
+
+            if not image_path:
+                continue
+
+            if not os.path.exists(
+                image_path
+            ):
+
+                print(
+                    "LAB: image missing:",
+                    image_path,
+                    flush=True
+                )
+
+                continue
+
+            with open(
+                image_path,
+                "rb"
+            ) as image_file:
+
+                image_bytes = image_file.read()
+
+            image_base64 = (
+                base64.b64encode(
+                    image_bytes
+                ).decode("utf-8")
+            )
+
+            image_data_url = (
+                "data:image/jpeg;base64,"
+                + image_base64
+            )
+
+            content.append({
+
+                "type":
+                    "image_url",
+
+                "image_url": {
+                    "url":
+                        image_data_url
+                }
+
+            })
+
+            valid_images += 1
+
+        if valid_images == 0:
+
+            return None
+
+        # -------------------------------------------------
+        # OpenRouter request
+        # -------------------------------------------------
+
+        payload = {
+
+            "model":
+                OPENROUTER_VISION_MODEL,
+
+            "messages": [
+
+                {
+                    "role":
+                        "system",
+
+                    "content":
+                        """
+تو سامانه استخراج نتایج آزمایش پزشکی هستی.
+
+فقط اطلاعات قابل مشاهده را استخراج کن.
+
+هیچ حدس، تشخیص، تفسیر یا توصیه پزشکی ارائه نده.
+
+خروجی فقط JSON معتبر باشد.
+"""
+                },
+
+                {
+                    "role":
+                        "user",
+
+                    "content":
+                        content
+                }
+
+            ],
+
+            "temperature":
+                0.0,
+
+            "max_tokens":
+                4000,
+
+            "reasoning": {
+                "enabled":
+                    False
+            }
+        }
+
+        headers = {
+
+            "Authorization":
+                f"Bearer {OPENROUTER_API_KEY}",
+
+            "Content-Type":
+                "application/json",
+
+            "HTTP-Referer":
+                "https://htvsai.app",
+
+            "X-Title":
+                "Mahroo"
+        }
+
+        print(
+            "========== LAB VISION START ==========",
+            flush=True
+        )
+
+        print(
+            "LAB images:",
+            valid_images,
+            flush=True
+        )
+
+        response = requests.post(
+
+            "https://openrouter.ai/api/v1/chat/completions",
+
+            headers=headers,
+
+            json=payload,
+
+            timeout=180
+        )
+
+        print(
+            "LAB Vision status:",
+            response.status_code,
+            flush=True
+        )
+
+        print(
+            "LAB Vision response:",
+            response.text[:6000],
+            flush=True
+        )
+
+        if not response.ok:
+
+            return None
+
+        data = response.json()
+
+        choices = data.get(
+            "choices",
+            []
+        )
+
+        if not choices:
+
+            return None
+
+        answer = (
+            choices[0]
+            .get("message", {})
+            .get("content")
+        )
+
+        if not answer:
+
+            return None
+
+        answer = answer.strip()
+
+        # -------------------------------------------------
+        # Remove markdown code fences
+        # -------------------------------------------------
+
+        if answer.startswith("```"):
+
+            lines = answer.splitlines()
+
+            if lines:
+                lines = lines[1:]
+
+            if (
+                lines
+                and lines[-1].strip() == "```"
+            ):
+
+                lines = lines[:-1]
+
+            answer = "\n".join(
+                lines
+            ).strip()
+
+        # -------------------------------------------------
+        # Parse JSON
+        # -------------------------------------------------
+
+        result = json.loads(
+            answer
+        )
+
+        if not isinstance(
+            result,
+            dict
+        ):
+
+            return None
+
+        if not isinstance(
+            result.get("results"),
+            list
+        ):
+
+            result["results"] = []
+
+        return result
+
+    except Exception as e:
+
+        print(
+            "LAB Vision exception:",
+            repr(e),
+            flush=True
+        )
+
+        return None
+
+
+# =========================================================
+# LAB DATE PARSER
+# =========================================================
+
+def lab_parse_date(
+    value
+):
+
+    if not value:
+
+        return (
+            datetime.now(
+                IRAN_TZ
+            ).date()
+        )
+
+    text = str(
+        value
+    ).strip()
+
+    # YYYY-MM-DD
+    try:
+
+        return datetime.strptime(
+            text,
+            "%Y-%m-%d"
+        ).date()
+
+    except Exception:
+        pass
+
+    # fallback: current date
+    return (
+        datetime.now(
+            IRAN_TZ
+        ).date()
+    )
+
+
+# =========================================================
+# LAB PREVIEW
+# =========================================================
+
+def lab_build_preview(
+    lab_data
+):
+
+    if not lab_data:
+
+        return (
+            "❌ اطلاعات آزمایش قابل استخراج نیست."
+        )
+
+    results = lab_data.get(
+        "results",
+        []
+    )
+
+    if not results:
+
+        return (
+            "❌ هیچ نتیجه‌ای از آزمایش "
+            "قابل تشخیص نیست.\n\n"
+            "لطفاً تصاویر واضح و کامل باشند."
+        )
+
+    message = (
+        "🧪 <b>نتایج استخراج‌شده از آزمایش</b>\n\n"
+    )
+
+    test_date = lab_data.get(
+        "test_date"
+    )
+
+    laboratory = lab_data.get(
+        "laboratory"
+    )
+
+    if test_date:
+
+        message += (
+            f"📅 تاریخ: {test_date}\n"
+        )
+
+    if laboratory:
+
+        message += (
+            f"🏥 آزمایشگاه: {laboratory}\n"
+        )
+
+    message += "\n"
+
+    for index, item in enumerate(
+        results,
+        start=1
+    ):
+
+        name = (
+            item.get("name")
+            or "نامشخص"
+        )
+
+        value = item.get(
+            "value"
+        )
+
+        unit = item.get(
+            "unit"
+        )
+
+        reference_range = item.get(
+            "reference_range"
+        )
+
+        message += (
+            f"<b>{index}. {name}</b>\n"
+        )
+
+        message += (
+            "🔢 نتیجه: "
+            f"{value if value is not None else 'نامشخص'}"
+        )
+
+        if unit:
+
+            message += (
+                f" {unit}"
+            )
+
+        message += "\n"
+
+        if reference_range:
+
+            message += (
+                f"📏 محدوده مرجع: "
+                f"{reference_range}\n"
+            )
+
+        message += "\n"
+
+    message += (
+        "━━━━━━━━━━━━━━━━━━\n\n"
+        "⚠️ لطفاً اعداد و نتایج بالا را بررسی کنید.\n\n"
+        "آیا اطلاعات استخراج‌شده صحیح است؟"
+    )
+
+    return message
+
+
+# =========================================================
+# LAB SAVE
+# =========================================================
+
+def lab_save_record(
+    user_id,
+    lab_data
+):
+
+    if not lab_data:
+
+        return None
+
+    results = lab_data.get(
+        "results",
+        []
+    )
+
+    if not results:
+
+        return None
+
+    record_date = lab_parse_date(
+        lab_data.get(
+            "test_date"
+        )
+    )
+
+    laboratory = (
+        lab_data.get(
+            "laboratory"
+        )
+        or "آزمایش"
+    )
+
+    title = (
+        f"آزمایش - {laboratory}"
+    )
+
+    # -----------------------------------------------------
+    # Build readable extracted text
+    # -----------------------------------------------------
+
+    extracted_lines = []
+
+    for item in results:
+
+        name = (
+            item.get("name")
+            or "نامشخص"
+        )
+
+        value = item.get(
+            "value"
+        )
+
+        unit = item.get(
+            "unit"
+        )
+
+        reference_range = item.get(
+            "reference_range"
+        )
+
+        line = (
+            f"{name}: "
+            f"{value if value is not None else 'نامشخص'}"
+        )
+
+        if unit:
+
+            line += (
+                f" {unit}"
+            )
+
+        if reference_range:
+
+            line += (
+                f" | محدوده مرجع: "
+                f"{reference_range}"
+            )
+
+        extracted_lines.append(
+            line
+        )
+
+    extracted_text = "\n".join(
+        extracted_lines
+    )
+
+    # -----------------------------------------------------
+    # Save full laboratory record
+    # -----------------------------------------------------
+
+    with get_db_connection() as conn:
+
+        with conn.cursor() as cur:
+
+            cur.execute("""
+                INSERT INTO mahroo_health_records (
+                    user_id,
+                    record_type,
+                    record_date,
+                    title,
+                    extracted_text,
+                    structured_data,
+                    user_confirmed,
+                    notes
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s::jsonb,
+                    TRUE,
+                    %s
+                )
+                RETURNING id
+            """, (
+                user_id,
+                "laboratory_test",
+                record_date,
+                title,
+                extracted_text,
+                json.dumps(
+                    lab_data,
+                    ensure_ascii=False
+                ),
+                "نتایج آزمایش توسط کاربر تأیید شده است."
+            ))
+
+            record_id = cur.fetchone()[0]
+
+            # -------------------------------------------------
+            # Add a short summary to health profile
+            # -------------------------------------------------
+
+            summary_lines = []
+
+            summary_lines.append(
+                f"نتایج آزمایش "
+                f"{record_date.isoformat()}:"
+            )
+
+            for item in results:
+
+                name = (
+                    item.get("name")
+                    or "نامشخص"
+                )
+
+                value = item.get(
+                    "value"
+                )
+
+                unit = item.get(
+                    "unit"
+                )
+
+                line = (
+                    f"{name}: "
+                    f"{value if value is not None else 'نامشخص'}"
+                )
+
+                if unit:
+
+                    line += (
+                        f" {unit}"
+                    )
+
+                summary_lines.append(
+                    line
+                )
+
+            lab_summary = (
+                "🧪 "
+                + "\n".join(
+                    summary_lines
+                )
+            )
+
+            # -------------------------------------------------
+            # Update patient profile if exists
+            # -------------------------------------------------
+
+            cur.execute("""
+                SELECT important_notes
+                FROM mahroo_patient_profiles
+                WHERE user_id = %s
+                FOR UPDATE
+            """, (
+                user_id,
+            ))
+
+            profile_row = cur.fetchone()
+
+            if profile_row:
+
+                old_notes = (
+                    profile_row[0]
+                    or ""
+                )
+
+                if old_notes.strip():
+
+                    new_notes = (
+                        old_notes.strip()
+                        + "\n\n"
+                        + lab_summary
+                    )
+
+                else:
+
+                    new_notes = lab_summary
+
+                cur.execute("""
+                    UPDATE mahroo_patient_profiles
+                    SET important_notes = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE user_id = %s
+                """, (
+                    new_notes,
+                    user_id
+                ))
+
+            conn.commit()
+
+    print(
+        "LAB: record saved:",
+        record_id,
+        flush=True
+    )
+
+    return record_id
+
+
+# =========================================================
+# LAB FINISH PROCESSING
+# =========================================================
+
+def lab_finish_processing(
+    user_id,
+    chat_id
+):
+
+    state, data = get_session(
+        user_id
+    )
+
+    if state != LAB_STATE_IMAGES:
+
+        return True
+
+    image_paths = data.get(
+        "image_paths",
+        []
+    )
+
+    if not image_paths:
+
+        send_message(
+            chat_id,
+            "❌ هنوز هیچ تصویری ارسال نکرده‌اید.\n\n"
+            "لطفاً ابتدا عکس آزمایش را ارسال کنید.",
+            lab_upload_buttons()
+        )
+
+        return True
+
+    send_message(
+        chat_id,
+        "⏳ <b>در حال بررسی تصاویر آزمایش...</b>\n\n"
+        "لطفاً چند لحظه صبر کنید."
+    )
+
+    try:
+
+        lab_data = lab_extract_from_images(
+            image_paths
+        )
+
+        if not lab_data:
+
+            lab_delete_images(
+                image_paths
+            )
+
+            clear_session(
+                user_id
+            )
+
+            send_message(
+                chat_id,
+                "❌ متأسفانه استخراج اطلاعات آزمایش موفق نبود.\n\n"
+                "لطفاً دوباره آزمایش را ارسال کنید.",
+                MAIN_MENU_BUTTONS
+            )
+
+            return True
+
+        if not lab_data.get(
+            "results"
+        ):
+
+            lab_delete_images(
+                image_paths
+            )
+
+            clear_session(
+                user_id
+            )
+
+            send_message(
+                chat_id,
+                "❌ نتیجه قابل تشخیصی از آزمایش پیدا نشد.\n\n"
+                "لطفاً تصاویر واضح‌تر ارسال کنید.",
+                MAIN_MENU_BUTTONS
+            )
+
+            return True
+
+        # -------------------------------------------------
+        # Save extracted data temporarily in session
+        # -------------------------------------------------
+
+        set_session(
+            user_id,
+            LAB_STATE_CONFIRM,
+            {
+                "lab_data": lab_data,
+                "image_paths": image_paths
+            }
+        )
+
+        preview = lab_build_preview(
+            lab_data
+        )
+
+        send_message(
+            chat_id,
+            preview,
+            lab_confirm_buttons()
+        )
+
+        return True
+
+    except Exception as e:
+
+        print(
+            "LAB: finish processing error:",
+            repr(e),
+            flush=True
+        )
+
+        lab_delete_images(
+            image_paths
+        )
+
+        clear_session(
+            user_id
+        )
+
+        send_message(
+            chat_id,
+            "❌ هنگام پردازش آزمایش خطایی رخ داد.\n\n"
+            "لطفاً دوباره تلاش کنید.",
+            MAIN_MENU_BUTTONS
+        )
+
+        return True
+
+
+# =========================================================
+# LAB CONFIRM
+# =========================================================
+
+def lab_confirm(
+    user_id,
+    chat_id
+):
+
+    state, data = get_session(
+        user_id
+    )
+
+    if state != LAB_STATE_CONFIRM:
+
+        return True
+
+    lab_data = data.get(
+        "lab_data"
+    )
+
+    image_paths = data.get(
+        "image_paths",
+        []
+    )
+
+    try:
+
+        record_id = lab_save_record(
+            user_id,
+            lab_data
+        )
+
+        if not record_id:
+
+            send_message(
+                chat_id,
+                "❌ ذخیره اطلاعات آزمایش انجام نشد.\n\n"
+                "لطفاً دوباره تلاش کنید.",
+                MAIN_MENU_BUTTONS
+            )
+
+            lab_delete_images(
+                image_paths
+            )
+
+            clear_session(
+                user_id
+            )
+
+            return True
+
+        # -------------------------------------------------
+        # VERY IMPORTANT:
+        # Delete images after successful save
+        # -------------------------------------------------
+
+        lab_delete_images(
+            image_paths
+        )
+
+        clear_session(
+            user_id
+        )
+
+        send_message(
+            chat_id,
+
+            "✅ <b>آزمایش با موفقیت ثبت شد.</b>\n\n"
+            "اطلاعات آزمایش در پرونده سلامت شما ذخیره شد "
+            "و تصاویر موقت نیز حذف شدند.",
+
+            MAIN_MENU_BUTTONS
+        )
+
+        return True
+
+    except Exception as e:
+
+        print(
+            "LAB: save confirmation error:",
+            repr(e),
+            flush=True
+        )
+
+        lab_delete_images(
+            image_paths
+        )
+
+        clear_session(
+            user_id
+        )
+
+        send_message(
+            chat_id,
+
+            "❌ هنگام ذخیره آزمایش خطایی رخ داد.\n\n"
+            "تصاویر موقت حذف شدند.",
+
+            MAIN_MENU_BUTTONS
+        )
+
+        return True
+
+
+# =========================================================
+# LAB REJECT / RETRY
+# =========================================================
+
+def lab_retry(
+    user_id,
+    chat_id
+):
+
+    state, data = get_session(
+        user_id
+    )
+
+    if state != LAB_STATE_CONFIRM:
+
+        return True
+
+    image_paths = data.get(
+        "image_paths",
+        []
+    )
+
+    # Delete previous images
+    lab_delete_images(
+        image_paths
+    )
+
+    # Start a fresh laboratory session
+    set_session(
+        user_id,
+        LAB_STATE_IMAGES,
+        {
+            "image_paths": []
+        }
+    )
+
+    send_message(
+        chat_id,
+
+        "🔄 <b>دوباره شروع می‌کنیم.</b>\n\n"
+        "تصاویر قبلی حذف شدند.\n\n"
+        "لطفاً عکس آزمایش را دوباره ارسال کنید.\n"
+        "اگر چند صفحه دارد، همه صفحات را ارسال کنید.\n\n"
+        "پس از پایان ارسال، "
+        "«✅ اتمام ارسال تصاویر» را بزنید.",
+
+        lab_upload_buttons()
+    )
+
+    return True
+
+
+# =========================================================
+# LAB CANCEL
+# =========================================================
+
+def lab_cancel(
+    user_id,
+    chat_id
+):
+
+    try:
+
+        state, data = get_session(
+            user_id
+        )
+
+        image_paths = data.get(
+            "image_paths",
+            []
+        )
+
+        lab_delete_images(
+            image_paths
+        )
+
+    except Exception as e:
+
+        print(
+            "LAB cancel cleanup error:",
+            repr(e),
+            flush=True
+        )
+
+    clear_session(
+        user_id
+    )
+
+    send_message(
+        chat_id,
+
+        "❌ افزودن آزمایش لغو شد.\n\n"
+        "تمام تصاویر موقت حذف شدند.",
+
+        MAIN_MENU_BUTTONS
+    )
+
+    return True
+
+
+# =========================================================
+# LAB MESSAGE ROUTER
+# =========================================================
+#
+# این تابع را از handler اصلی صدا می‌زنیم.
+#
+# =========================================================
+
+def handle_lab_text(
+    user_id,
+    chat_id,
+    text
+):
+
+    state, data = get_session(
+        user_id
+    )
+
+    # -----------------------------------------------------
+    # Uploading images
+    # -----------------------------------------------------
+
+    if state == LAB_STATE_IMAGES:
+
+        if text == "✅ اتمام ارسال تصاویر":
+
+            return lab_finish_processing(
+                user_id,
+                chat_id
+            )
+
+        if text == "❌ لغو آزمایش":
+
+            return lab_cancel(
+                user_id,
+                chat_id
+            )
+
+        return False
+
+    # -----------------------------------------------------
+    # Confirmation
+    # -----------------------------------------------------
+
+    if state == LAB_STATE_CONFIRM:
+
+        if text == "✅ بله، اطلاعات درست است":
+
+            return lab_confirm(
+                user_id,
+                chat_id
+            )
+
+        if text == "❌ خیر، دوباره عکس می‌فرستم":
+
+            return lab_retry(
+                user_id,
+                chat_id
+            )
+
+        return False
+
+    return False
+
+
+# =========================================================
+# LAB MODULE LOADED
+# =========================================================
+
+print(
+    "========== MAHROO LAB MODULE LOADED ==========",
+    flush=True
+)
+
+
