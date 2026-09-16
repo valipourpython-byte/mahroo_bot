@@ -4970,6 +4970,11 @@ def create_due_occurrences():
             ))
 
             rows = cur.fetchall()
+            print(
+                "REMINDER DEBUG - rows:",
+                rows,
+                flush=True
+            )
 
             for row in rows:
 
